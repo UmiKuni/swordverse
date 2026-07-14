@@ -43,8 +43,8 @@ Login → WebSocket connect → Host or join room → both ready → match creat
 Each round has the four README phases:
 
 1. `RENEWAL`: server resolves active effects, converts remaining MP to QP at the Order-defined ratio, then fully restores MP.
-2. `ASCENSION`: each player privately allocates 2 Learning Points (LP) to stats, learning a Technique, or levelling an existing Technique. Both allocations resolve simultaneously.
-3. `ACTION_STRATEGY`: each player privately configures and confirms an Action Queue.
+2. `ASCENSION`: each player builds a local 2 Learning Point (LP) allocation, then submits it once as a confirmation. Both allocations resolve simultaneously.
+3. `ACTION_STRATEGY`: each player builds a local Action Queue, then submits it once as a confirmation.
 4. `BATTLE`: the server reveals and resolves Actions one at a time and emits the Battle Log.
 
 Action Queue length by round:
@@ -195,7 +195,7 @@ Creating a room makes the caller its host and first player. A room has a maximum
 
 ### Match APIs
 
-Only a match player can read these resources. The regular match response is a public snapshot: no opponent private draft and no unrevealed Action Queue may appear.
+Only a match player can read these resources. The regular match response is a public snapshot: it includes no opponent's unrevealed selection or Action Queue.
 
 | Method | Path | Authentication | Request body | Success response | Errors |
 | --- | --- | --- | --- | --- | --- |
@@ -240,21 +240,15 @@ Only a match player can read these resources. The regular match response is a pu
 | Client → server | `/app/rooms/{roomId}/ready` | Set caller readiness |
 | Client → server | `/app/rooms/{roomId}/start` | Host starts a two-player ready room |
 | Client → server | `/app/rooms/{roomId}/request-snapshot` | Request caller's room snapshot |
-| Client → server | `/app/matches/{matchId}/select-main-order` | Submit a secret Main Order draft |
-| Client → server | `/app/matches/{matchId}/confirm-main-order` | Confirm Main Order draft |
-| Client → server | `/app/matches/{matchId}/select-support-loadout` | Submit secret Support Order and Support Technique draft |
-| Client → server | `/app/matches/{matchId}/confirm-support-loadout` | Confirm support loadout |
-| Client → server | `/app/matches/{matchId}/submit-ascension-draft` | Submit private LP allocation |
-| Client → server | `/app/matches/{matchId}/confirm-ascension` | Confirm LP allocation |
-| Client → server | `/app/matches/{matchId}/submit-action-queue-draft` | Submit private Action Queue draft |
-| Client → server | `/app/matches/{matchId}/confirm-action-queue` | Confirm Action Queue draft |
+| Client → server | `/app/matches/{matchId}/confirm-main-order` | Confirm a secret Main Order |
+| Client → server | `/app/matches/{matchId}/confirm-support-loadout` | Confirm a secret Support Order and Support Technique |
+| Client → server | `/app/matches/{matchId}/confirm-ascension` | Confirm the complete LP allocation |
+| Client → server | `/app/matches/{matchId}/confirm-action-queue` | Confirm the complete Action Queue |
 | Client → server | `/app/matches/{matchId}/request-snapshot` | Request public match snapshot |
-| Client → server | `/app/matches/{matchId}/request-private-snapshot` | Request caller's private snapshot |
 | Client → server | `/app/matches/{matchId}/surrender` | Caller surrenders |
 | Server → client | `/topic/rooms/{roomId}` | Public room events for room players |
 | Server → client | `/topic/matches/{matchId}` | Public match events for both players |
 | Server → client | `/user/queue/room-events` | Private room response/snapshot for the authenticated user |
-| Server → client | `/user/queue/match-events` | Private draft acknowledgement, preview, and snapshot |
 | Server → client | `/user/queue/errors` | Private error when no domain stream is appropriate |
 
 The server maps `/user/queue/...` through the JWT `Principal`. A client subscribes only to the literal user destination and cannot select a recipient. The server must authorize room/match topic subscriptions by membership.
@@ -266,16 +260,15 @@ All client messages use `ClientCommand`. `roomId` is present only on room comman
 ```json
 {
   "commandId": "92e72a9b-6e7d-4be5-bc87-37fc7aa5f2aa",
-  "type": "SUBMIT_ACTION_QUEUE_DRAFT",
+  "type": "CONFIRM_ACTION_QUEUE",
   "matchId": "match-001",
   "expectedMatchVersion": 18,
-  "privateRevision": 4,
   "clientTime": 1783770000000,
   "payload": {}
 }
 ```
 
-All server messages use `ServerEvent`. Room public events carry `roomVersion`; match public events carry `matchVersion`; a private match event carries the recipient's `privateRevision` when it changes.
+All server messages use `ServerEvent`. Room public events carry `roomVersion`; match public events carry `matchVersion`. This simplified contract has no server-stored editable drafts, so it does not use a private revision.
 
 ```json
 {
@@ -289,7 +282,7 @@ All server messages use `ServerEvent`. Room public events carry `roomVersion`; m
 }
 ```
 
-`roomVersion` increments for each public room change. `matchVersion` increments for each public match change, including each phase transition and each Battle event. `privateRevision` increments only when the authenticated player's private draft or confirmation changes; it must not increment `matchVersion`.
+`roomVersion` increments for each public room change. `matchVersion` increments for each public match change, including a player confirmation, each phase transition, and each Battle event.
 
 For a public reducer:
 
@@ -305,9 +298,8 @@ Use a snapshot when entering, reloading, reconnecting, or detecting a version ga
 | --- | --- | --- |
 | `ROOM_SNAPSHOT` | `/user/queue/room-events` | Complete current public room state |
 | `MATCH_SNAPSHOT` | `/topic/matches/{matchId}` | Complete current public match state |
-| `PRIVATE_MATCH_SNAPSHOT` | `/user/queue/match-events` | Requester-only draft/confirmation state and private revision |
 
-On reconnect, subscribe first, then request the public and private snapshots. Do not replay stale private draft commands automatically.
+On reconnect, subscribe first, then request the public snapshot. Do not replay an earlier confirmation command automatically.
 
 ## Room commands and events
 
@@ -341,19 +333,21 @@ After `MATCH_CREATED`, both clients navigate to `/battle/{matchId}`, subscribe t
 
 ### Main Order selection
 
-| Command | Payload | Phase and validation | Private response | Public resolution |
-| --- | --- | --- | --- | --- |
-| `SELECT_MAIN_ORDER` | `{ "mainOrderId": "heaven-sword-order" }` | `PRE_MATCH_MAIN_ORDER_SELECTION`; valid existing Order; current versions | `MAIN_ORDER_DRAFT_ACCEPTED` with PR | None before both confirmations |
-| `CONFIRM_MAIN_ORDER` | `{}` | Valid current draft; phase/version/revision/membership | `MAIN_ORDER_CONFIRM_ACCEPTED` with PR | After both: `MAIN_ORDER_SELECTION_RESOLVED` |
+The Main Order picker is entirely client-local until the player presses Confirm. There is one command, not a select/save command followed by another confirm command.
 
-`MAIN_ORDER_SELECTION_RESOLVED` is public and includes both Main Order details and the next phase. A Main Order draft, including its ID before resolution, is never public.
+| Command | Payload | Phase and validation | Valid result | Invalid result |
+| --- | --- | --- | --- | --- |
+| `CONFIRM_MAIN_ORDER` | `{ "mainOrderId": "heaven-sword-order" }` | `PRE_MATCH_MAIN_ORDER_SELECTION`; valid existing Order; current match version; caller is a player | Public `PLAYER_CONFIRMATION_CHANGED` with `kind: "MAIN_ORDER"`; after both confirmations, `MAIN_ORDER_SELECTION_RESOLVED` | Private `COMMAND_REJECTED` |
+
+`MAIN_ORDER_SELECTION_RESOLVED` is public and includes both Main Order details and the next phase. Before resolution, the public confirmation event contains no Order ID.
 
 ### Support loadout selection
 
-| Command | Payload | Phase and validation | Private response | Public resolution |
+The Support Order and its one Support Technique are chosen locally and submitted together in one command.
+
+| Command | Payload | Phase and validation | Valid result | Invalid result |
 | --- | --- | --- | --- | --- |
-| `SELECT_SUPPORT_LOADOUT` | `{ "supportOrderId": "dragon-sword-order", "supportTechniqueId": "dragon-step" }` | `PRE_MATCH_SUPPORT_SELECTION`; existing Order and a Technique granted by it; current versions | `SUPPORT_LOADOUT_DRAFT_ACCEPTED` with PR | None before both confirmations |
-| `CONFIRM_SUPPORT_LOADOUT` | `{}` | Valid current draft; phase/version/revision/membership | `SUPPORT_LOADOUT_CONFIRM_ACCEPTED` with PR | After both: `SUPPORT_LOADOUT_RESOLVED`, then `RENEWAL_STARTED` |
+| `CONFIRM_SUPPORT_LOADOUT` | `{ "supportOrderId": "dragon-sword-order", "supportTechniqueId": "dragon-step" }` | `PRE_MATCH_SUPPORT_SELECTION`; existing Order and a Technique granted by it; current match version; caller is a player | Public `PLAYER_CONFIRMATION_CHANGED` with `kind: "SUPPORT_LOADOUT"`; after both confirmations, `SUPPORT_LOADOUT_RESOLVED`, then `RENEWAL_STARTED` | Private `COMMAND_REJECTED` |
 
 `SUPPORT_LOADOUT_RESOLVED` publicly includes both Support Orders, each selected Support Technique, and each player’s authoritative initial state/available Actions. The server derives the three Main Techniques from the selected Main Order’s configured Action set when building the final Action list; it does not accept a client-supplied stat or action list as authoritative.
 
@@ -409,10 +403,10 @@ Renewal has no client command. The server resolves all active effects, converts 
 
 ### Ascension
 
-Each player receives exactly 2 LP each round. An allocation can upgrade `STR`, `HP`, `DEF`, `AS`, `MP`, or `QP`; learn an eligible Technique; or level an owned Technique. Exact costs, eligibility, and stat gains are server rules. Drafts and previews remain private until both confirmations.
+Each player receives exactly 2 LP each round. An allocation can upgrade `STR`, `HP`, `DEF`, `AS`, `MP`, or `QP`; learn an eligible Technique; or level an owned Technique. Exact costs, eligibility, and stat gains are server rules. The player may edit the allocation locally, but the server receives it only once, in the confirmation command.
 
 ```json
-// SUBMIT_ASCENSION_DRAFT payload
+// CONFIRM_ASCENSION payload
 {
   "allocations": [
     { "target": "STAT", "stat": "STR", "learningPoints": 1 },
@@ -421,26 +415,24 @@ Each player receives exactly 2 LP each round. An allocation can upgrade `STR`, `
 }
 ```
 
-| Command | Phase / validation | Private response | Public response after both confirms |
+| Command | Payload and validation | Valid result | Invalid result |
 | --- | --- | --- | --- |
-| `SUBMIT_ASCENSION_DRAFT` | `ASCENSION`; 2 LP maximum; valid stat/Technique target; expected MV and PR | `ASCENSION_DRAFT_ACCEPTED` with normalized draft, server preview, PR | None |
-| `CONFIRM_ASCENSION` | Valid current draft and expected MV/PR | `ASCENSION_CONFIRM_ACCEPTED` with PR | `ASCENSION_RESOLVED`, then `ACTION_STRATEGY_STARTED` |
+| `CONFIRM_ASCENSION` | `allocations`; `ASCENSION`; exactly 2 LP; valid stat/Technique target; expected MV; caller is a player | Public `PLAYER_CONFIRMATION_CHANGED` with `kind: "ASCENSION"`; after both confirmations, `ASCENSION_RESOLVED`, then `ACTION_STRATEGY_STARTED` | Private `COMMAND_REJECTED` |
 
-`PLAYER_CONFIRMATION_CHANGED` may announce only `{ playerId, kind: "ASCENSION", confirmed }`. It must not include an opponent's allocation. `ASCENSION_RESOLVED` applies both allocations atomically, exposes official stats and learned/levelled Techniques, and advances the public version.
+`PLAYER_CONFIRMATION_CHANGED` may announce only `{ playerId, kind: "ASCENSION", confirmed: true }`. It must not include either allocation. `ASCENSION_RESOLVED` applies both allocations atomically, exposes official stats and learned/levelled Techniques, and advances the public version.
 
 ### Action Strategy
 
-The client submits a complete ordered draft. An `actionId` may be a Basic Action ID or an Action derived from an owned/available Technique. The server validates availability, resource rules that are known at planning time, required length, and the previous-queue retention rule. The Action Queue and its confirmations are private until individual Actions are revealed in Battle.
+The player configures an ordered queue locally, then sends the complete queue in one confirmation command. An `actionId` may be a Basic Action ID or an Action derived from an owned/available Technique. The server validates availability, resource rules that are known at planning time, required length, and the previous-queue retention rule. The confirmed Action Queue remains hidden until individual Actions are revealed in Battle.
 
 ```json
-// SUBMIT_ACTION_QUEUE_DRAFT payload for round 2
+// CONFIRM_ACTION_QUEUE payload for round 2
 { "actionIds": ["basic-strike", "quick-slash", "heaven-guard"] }
 ```
 
-| Command | Phase / validation | Private response | Public response after both confirms |
+| Command | Payload and validation | Valid result | Invalid result |
 | --- | --- | --- | --- |
-| `SUBMIT_ACTION_QUEUE_DRAFT` | `ACTION_STRATEGY`; exact required size; available Actions only; at most one old occurrence removed; retained order preserved | `ACTION_QUEUE_DRAFT_ACCEPTED` with normalized queue and PR | None |
-| `CONFIRM_ACTION_QUEUE` | Valid current draft and expected MV/PR | `ACTION_QUEUE_CONFIRM_ACCEPTED` with PR | `BATTLE_STARTED` |
+| `CONFIRM_ACTION_QUEUE` | `actionIds`; `ACTION_STRATEGY`; exact required size; available Actions only; at most one old occurrence removed; retained order preserved; expected MV | Public `PLAYER_CONFIRMATION_CHANGED` with `kind: "ACTION_QUEUE"`; after both confirmations, `BATTLE_STARTED` | Private `COMMAND_REJECTED` |
 
 ### Battle and match completion
 
@@ -506,7 +498,7 @@ For a disconnect, the server publishes `PLAYER_CONNECTION_CHANGED` with `connect
 | `PLAYER_NOT_IN_ROOM`, `NOT_ROOM_HOST`, `PLAYERS_NOT_READY` | Caller lacks room authority or start requirements fail |
 | `MATCH_NOT_FOUND`, `PLAYER_NOT_IN_MATCH`, `MATCH_NOT_FINISHED` | Match resource or membership is invalid |
 | `INVALID_MATCH_PHASE` | Command cannot run in current phase |
-| `STALE_ROOM_VERSION`, `STALE_MATCH_VERSION`, `STALE_PRIVATE_REVISION` | Caller must request/reconcile a snapshot |
+| `STALE_ROOM_VERSION`, `STALE_MATCH_VERSION` | Caller must request/reconcile a snapshot |
 | `ORDER_NOT_FOUND`, `TECHNIQUE_NOT_FOUND`, `SUPPORT_TECHNIQUE_INVALID` | Selection does not identify a valid Order/Technique relationship |
 | `LEARNING_POINTS_EXCEEDED`, `INVALID_ASCENSION_TARGET` | LP allocation is invalid |
 | `ACTION_COUNT_INVALID`, `ACTION_NOT_AVAILABLE`, `ACTION_REMOVAL_LIMIT_REACHED`, `ACTION_ORDER_INVALID` | Action Queue violates the round or ownership rules |
@@ -517,15 +509,14 @@ STOMP rejections are private and retain the correlation ID:
 
 ```json
 {
-  "type": "PRIVATE_COMMAND_REJECTED",
+  "type": "COMMAND_REJECTED",
   "matchId": "match-001",
   "matchVersion": 18,
-  "privateRevision": 4,
   "correlationId": "92e72a9b-6e7d-4be5-bc87-37fc7aa5f2aa",
   "serverTime": 1783770000000,
   "payload": {
-    "code": "STALE_PRIVATE_REVISION",
-    "message": "Request a private snapshot before editing again."
+    "code": "ACTION_COUNT_INVALID",
+    "message": "Round 2 requires exactly three Actions."
   }
 }
 ```
@@ -544,7 +535,6 @@ export interface ClientCommand<TPayload = Record<string, never>> {
   matchId?: string;
   expectedRoomVersion?: number;
   expectedMatchVersion?: number;
-  privateRevision?: number;
   clientTime: number;
   payload: TPayload;
 }
@@ -556,7 +546,6 @@ export interface ServerEvent<TPayload = unknown> {
   matchId?: string;
   roomVersion?: number;
   matchVersion?: number;
-  privateRevision?: number;
   serverTime: number;
   correlationId?: string;
   payload: TPayload;
@@ -578,13 +567,13 @@ export interface AscensionAllocation {
 ```java
 public record ClientCommand<T>(
     UUID commandId, String type, String roomId, String matchId,
-    Long expectedRoomVersion, Long expectedMatchVersion, Long privateRevision,
+    Long expectedRoomVersion, Long expectedMatchVersion,
     long clientTime, T payload
 ) {}
 
 public record ServerEvent<T>(
     UUID eventId, String type, String roomId, String matchId,
-    Long roomVersion, Long matchVersion, Long privateRevision,
+    Long roomVersion, Long matchVersion,
     long serverTime, UUID correlationId, T payload
 ) {}
 
@@ -628,18 +617,14 @@ sequenceDiagram
   B->>S: Subscribe to match topic
   B->>S: Request snapshot
 
-  A->>S: SELECT_MAIN_ORDER
-  A->>S: CONFIRM_MAIN_ORDER
-  B->>S: SELECT_MAIN_ORDER
-  B->>S: CONFIRM_MAIN_ORDER
+  A->>S: CONFIRM_MAIN_ORDER {mainOrderId}
+  B->>S: CONFIRM_MAIN_ORDER {mainOrderId}
 
   S-->>A: MAIN_ORDER_SELECTION_RESOLVED
   S-->>B: MAIN_ORDER_SELECTION_RESOLVED
 
-  A->>S: SELECT_SUPPORT_LOADOUT
-  A->>S: CONFIRM_SUPPORT_LOADOUT
-  B->>S: SELECT_SUPPORT_LOADOUT
-  B->>S: CONFIRM_SUPPORT_LOADOUT
+  A->>S: CONFIRM_SUPPORT_LOADOUT {order, technique}
+  B->>S: CONFIRM_SUPPORT_LOADOUT {order, technique}
 
   S-->>A: SUPPORT_LOADOUT_REVEALED
   S-->>B: SUPPORT_LOADOUT_REVEALED
@@ -648,20 +633,16 @@ sequenceDiagram
   S-->>A: ASCENSION_STARTED
   S-->>B: ASCENSION_STARTED
 
-  A->>S: Update private ASCENSION draft
-  A->>S: CONFIRM_ASCENSION
-  B->>S: Update private ASCENSION draft
-  B->>S: CONFIRM_ASCENSION
+  A->>S: CONFIRM_ASCENSION {allocations}
+  B->>S: CONFIRM_ASCENSION {allocations}
 
   S-->>A: ASCENSION_RESOLVED
   S-->>B: ASCENSION_RESOLVED
   S-->>A: ACTION_STRATEGY_STARTED
   S-->>B: ACTION_STRATEGY_STARTED
 
-  A->>S: Update private Action Queue draft
-  A->>S: CONFIRM_ACTION_QUEUE
-  B->>S: Update private Action Queue draft
-  B->>S: CONFIRM_ACTION_QUEUE
+  A->>S: CONFIRM_ACTION_QUEUE {actionIds}
+  B->>S: CONFIRM_ACTION_QUEUE {actionIds}
 
   S-->>A: BATTLE_STARTED
   S-->>B: BATTLE_STARTED
@@ -685,8 +666,8 @@ sequenceDiagram
 
 * Derive player identity solely from JWT and `Principal`; never trust client-supplied player identity.
 * Authorize every REST read, STOMP command, snapshot request, and room/match subscription against membership. Require host authority to start a room.
-* Validate public version, private revision, current phase, and command idempotency before state mutation.
+* Validate the public version, current phase, and command idempotency before state mutation.
 * Use `commandId` as an idempotency key. A retry must not spend LP twice, confirm twice, change readiness twice, or create a second match.
-* Never publish private Order/loadout/Ascension/Action Queue drafts or previews to a public topic.
+* Never publish a confirmed-but-unrevealed Main Order, Support loadout, Ascension allocation, or Action Queue to a public topic. Publish only a player confirmation flag until the phase resolves.
 * Never send the complete future execution plan; expose a Battle Action only through `ACTION_REVEALED`.
-* Redux reducers consume authoritative public events/snapshots and private events only for the signed-in player. RTK Query owns REST data and reload-safe snapshots. Client animation timing is presentation only.
+* Redux reducers consume authoritative public events/snapshots; `/user/queue/errors` is used only for the signed-in player's rejected commands. RTK Query owns REST data and reload-safe snapshots. Client animation timing is presentation only.
