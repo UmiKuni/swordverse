@@ -1,60 +1,137 @@
-# Introduction
-A PvP round-bases auto-combat game with Sword Universe theme.
+# ⚔️ SwordVerse
 
-**Current Version: 1.0**
+> A 1v1 online web game featuring round-based progression, auto-combat mechanics, and a sword-themed fantasy world.
 
-# Game Mechanics
-## :book: Story
-You are diving into a World where swords is what you need to be Master of. To become a SwordMaster, you need to master your sword skils to create a Flashy combo or a One-shot slash and defeat a strong Swordman.
-## :video_game: How to Play
-### 1. Authenticate
-Create an account and log in.
+## Overview
 
-### 2. Host & Join Mode
-Host a room and send your room code to your friend. Both of you ready for a Battle!
+| Information         | Details                 |
+| ------------------- | ----------------------- |
+| **Name**            | SwordVerse              |
+| **Current Version** | 1.0                     |
+| **Game Mode**       | Online 1v1              |
+| **Genre**           | Round-based auto-combat |
 
-### 3. Select your Orders
-Select a **Main Order** and a **Support Order** from a Order List that match with your play style! 
+## 📖 Handbook
 
-Each Order give you a unique characteristic:
-- A **Status** includes:
-  
-| Status | Shorten | Description |
-| ---| --- | --- |
-| :crossed_swords: Strength | STR | Damage you can deal to your opponent. |
-| :heart: Health Point| HP | Your life. If it reaches 0, you lose the Match. |
-| :shield: Defense | DEF | Reduce the damage taken from your opponent. |
-| :zap: Attack Speed | AS| Represents how fast you can attack your opponent. |
-| :sparkles: Mana Point | MP| A resource that you can use to active an Action. |
-| :crystal_ball: Qi Point | QP | A special resource that you active some special Actions. |
+### :book: Story
 
-- A set of Techniques that you can use in the Match. Each Technique has a unique effect and cost (using MP or QP). 
+Enter a world where mastering the sword is the path to ultimate power.
 
-### 4. Match Start
-After both players select their Orders, they can see each other Orders they have followed and the Match begins !
+To become a **SwordMaster**, you must master your sword techniques, create flashy combos, unleash devastating one-shot slashes, and defeat powerful swordsmen.
 
-A Match is running through many Rounds, and each Round consists of 3 Phases:
-1. **Renewal Phase:** Players convert 
+### :video_game: How to Play
 
-A Match ends immediately when one of these conditions is met:
-- One of the players' HP reaches 0
-- A Player surrenders
-- A Player disconnects over 5 minutes
+#### 1. Authenticate
 
+Create an account and log in to the game.
 
-# Technology
-For game-client:
-- React.js for game components library
-- Redux Toolkit for global state management + RTK Query for API calls
-- React Router for routing
-- STOMP for WebSocket communication
+#### 2. Host or Join a Room
 
-For game-server:
-- Spring Boot for REST API
-- Spring WebSocket for WebSocket communication
+Host a room and send the room code to your friend. Once both players are ready, the matchup begins.
 
-# How to run
-1. Clone the repository
-2. Install dependencies for both client and server:
-3. Run command
+#### 3. Pre-Matchup: Select Orders
 
+Both players secretly choose a **Main Order**. Their selections are revealed simultaneously.
+
+Next, each player chooses a **Support Order** and one support **Technique** from that Order. These selections are then revealed.
+
+Each Order provides unique characteristics, including:
+
+* A set of **Stats**:
+
+| Stat                      | Abbreviation | Description                                                |
+| ------------------------- | :----------: | ---------------------------------------------------------- |
+| :crossed_swords: Strength |      STR     | Determines how much damage you can deal to your opponent.  |
+| :heart: Health Points     |      HP      | Represents your life. If it reaches 0, you lose the match. |
+| :shield: Defense          |      DEF     | Reduces the damage received from your opponent.            |
+| :zap: Attack Speed        |      AS      | Represents how quickly you can attack your opponent.       |
+| :sparkles: Mana Points    |      MP      | A resource used to activate Actions.                       |
+| :crystal_ball: Qi Points  |      QP      | A special resource used to activate certain Actions.       |
+
+* A set of **Techniques** that can be used during the match. Each Technique has a unique effect and consumes either MP or QP.
+
+Your final **Action List** consists of:
+
+> **Basic Actions** + **3 Main Techniques** + **1 Support Technique**
+
+#### 4. Match Start
+
+After both players have selected their Orders, all selected Orders are revealed and the match begins.
+
+A match consists of multiple **Rounds**. Each Round proceeds through the following **four Phases**.
+
+##### 4.1. :hourglass_flowing_sand: RENEWAL Phase
+
+* Resolve all active **Effects**.
+* Convert all remaining **MP** into **QP** using a conversion ratio determined by the player's Order.
+* Fully restore **MP**.
+
+##### 4.2. :star: ASCENSION Phase
+
+* At the beginning of each Round, both players receive **2 Learning Points (LP)**.
+* Players secretly allocate their LP to upgrade **Stats**, learn a new **Technique**, or level up an existing Technique.
+* After both players confirm their LP allocation, the updated Stats and Techniques are revealed simultaneously.
+* The match then proceeds to the next Phase.
+
+##### 4.3. :scroll: ACTION STRATEGY Phase
+
+Each player has an **ACTION QUEUE**. Actions placed in this queue are automatically executed during the Battle Phase.
+
+During each Round, players must fill their ACTION QUEUE with the required number of Actions. Queue configuration is performed in the following order:
+
+1. Remove up to **1 existing Action** from the ACTION QUEUE.
+2. Add new Actions from the player's **Techniques** or **Basic Actions**.
+3. Place each new Action at the beginning, end, or between existing Actions in the queue.
+
+| Round | ACTION QUEUE Size |
+| :---: | :---------------: |
+|   1   |         2         |
+|   2   |         3         |
+|   3   |         4         |
+|   4   |         5         |
+|   5   |         6         |
+|   6+  |         7         |
+
+Once both players have confirmed a valid ACTION QUEUE, the match proceeds to the Battle Phase.
+
+##### 4.4. :dart: BATTLE Phase
+
+Each **Action** in the **ACTION QUEUE** is revealed and executed in order. The result of each Action is displayed in the **Battle Log**.
+
+The Battle Phase continues until:
+
+* Every Action in the ACTION QUEUE has been executed; or
+* One of the players meets a **Match End Condition**.
+
+If all Actions have been executed and neither player meets a Match End Condition, a new Round begins.
+
+#### 5. :trophy: Match End Conditions
+
+A player wins the match when one of the following conditions is met:
+
+* The opponent's HP reaches 0.
+* The opponent surrenders.
+* The opponent remains disconnected for more than 5 minutes.
+
+When one of these conditions is met, the match ends immediately and the result is displayed on the **Match Result Board**.
+
+## 🛠️ Technology
+
+### Game Client
+
+* **React.js** — Game component library and user interface.
+* **Redux Toolkit** — Global state management.
+* **RTK Query** — API requests and server-state management.
+* **React Router** — Client-side routing.
+* **STOMP** — WebSocket communication.
+
+### Game Server
+
+* **Spring Boot** — REST API development.
+* **Spring WebSocket** — Real-time WebSocket communication.
+
+## 🚀 How to Run
+
+1. Clone the repository.
+2. Install the required dependencies for both the client and server.
+3. Run the startup commands for the client and server.
