@@ -119,11 +119,11 @@ When one of these conditions is met, the match ends immediately and the result i
 
 ### Game Client
 
-* **React.js** — Game component library and user interface.
+* **React.js** + **Typescript** — Game component library and user interface + type safety.
 * **Redux Toolkit** — Global state management.
 * **RTK Query** — API requests and server-state management.
 * **React Router** — Client-side routing.
-* **STOMP** — WebSocket communication.
+* **STOMP** + **SockJS** — WebSocket communication.
 
 ### Game Server
 
