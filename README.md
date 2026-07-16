@@ -29,11 +29,13 @@ Create an account and log in to the game.
 
 Host a room and send the room code to your friend. Once both players are ready, the matchup begins.
 
+The host can remove a player from the room before the match starts, and any player can leave on their own. A match cannot begin while either player is disconnected — both must be present, ready, and connected.
+
 #### 3. Pre-Matchup: Select Orders
 
 Both players secretly choose a **Main Order**. Their selections are revealed simultaneously.
 
-Next, each player chooses a **Support Order** and one support **Technique** from that Order. These selections are then revealed.
+Next, each player chooses a **Support Order** and one support **Technique** from that Order. These selections are then revealed. Your Support Order can be the same as your Main Order, but your Support Technique can't be one you already have from your Main Order.
 
 Each Order provides unique characteristics, including:
 
@@ -72,6 +74,7 @@ A match consists of multiple **Rounds**. Each Round proceeds through the followi
 * Players secretly allocate their LP to upgrade **Stats**, learn a new **Technique**, or level up an existing Technique.
 * After both players confirm their LP allocation, the updated Stats and Techniques are revealed simultaneously.
 * The match then proceeds to the next Phase.
+* If you don't confirm before time runs out, whatever allocation you had set (or nothing, if you hadn't set anything) locks in as-is — unused Learning Points for that Round are lost, they don't carry over.
 
 ##### 4.3. :scroll: ACTION STRATEGY Phase
 
@@ -92,11 +95,17 @@ During each Round, players must fill their ACTION QUEUE with the required number
 |   5   |         6         |
 |   6+  |         7         |
 
+The same Action can be placed in the queue more than once, as long as you'll be able to afford it each time it comes up.
+
+If you don't confirm a full queue before time runs out, whatever you had queued locks in as-is — any empty slots are treated as automatic misses once the Battle reaches them.
+
 Once both players have confirmed a valid ACTION QUEUE, the match proceeds to the Battle Phase.
 
 ##### 4.4. :dart: BATTLE Phase
 
-Each **Action** in the **ACTION QUEUE** is revealed and executed in order. The result of each Action is displayed in the **Battle Log**.
+**Actions** execute in *ping-pong order*: your next queued Action, then your opponent's next queued Action, back and forth until both queues are empty. **Initiative** - who acts first - **alternates** each Round (Player A leads Round 1, Player B leads Round 2, and so on).
+
+If a player reaches their turn but can't afford the Action's cost, or is disabled by an active Effect, that Action automatically fails and the turn passes straight to the opponent. The result of each Action is displayed in the **Battle Log**.
 
 The Battle Phase continues until:
 
@@ -112,6 +121,8 @@ A player wins the match when one of the following conditions is met:
 * The opponent's HP reaches 0.
 * The opponent surrenders.
 * The opponent remains disconnected for more than 5 minutes.
+
+**You can surrender at any point once the match has begun.** The **5-minute disconnect timer** starts the instant a player disconnects, no matter which Phase the match is currently in.
 
 When one of these conditions is met, the match ends immediately and the result is displayed on the **Match Result Board**.
 

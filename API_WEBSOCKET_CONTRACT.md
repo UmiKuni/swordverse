@@ -62,6 +62,12 @@ After round 1, a plan may remove at most one occurrence from the previous queue.
 
 The match ends immediately when HP reaches zero, a player surrenders, or a player has stayed disconnected for more than five minutes. Result reasons are `HP_REACHED_ZERO`, `SURRENDER`, and `DISCONNECTED`.
 
+### Battle execution order
+
+Within a Round, Actions execute in strict ping-pong order: the initiative player's next queued Action, then the opponent's next queued Action, alternating until both queues are exhausted. Initiative alternates by round — Player A leads round 1, Player B leads round 2, and so on.
+
+If, when an Action's turn arrives, its owner lacks the required MP/QP or is disabled by an active effect, the server immediately marks that Action as failed and reveals it with `status: "FAILED"`. A failed Action consumes no resource, applies no effect, and execution proceeds immediately to the opponent's next Action.
+
 ## Authentication and transport
 
 ### REST authentication
@@ -107,6 +113,8 @@ const stompClient = new Client({
 ```
 
 The server validates the token on `CONNECT` and constructs the Spring `Principal`. Every handler derives the player identity from that `Principal`; it must ignore any client-provided player ID. In production, use WSS.
+
+**Token refresh during an open connection.** The STOMP session is validated only at `CONNECT` and is unaffected by the access token expiring afterward — the client refreshes it in the background via `POST /api/auth/refresh` over REST, and the existing WebSocket connection stays open and authenticated as-is. The refreshed token is only required the next time the client performs a new `CONNECT` (e.g., reconnecting after a network drop); it is never pushed into or re-validated against an already-open STOMP session.
 
 ## REST APIs
 
@@ -301,6 +309,8 @@ Use a snapshot when entering, reloading, reconnecting, or detecting a version ga
 
 On reconnect, subscribe first, then request the public snapshot. Do not replay an earlier confirmation command automatically.
 
+**General timeout rule.** This applies to every confirmation-based phase (`ASCENSION`, `ACTION_STRATEGY`, and any future phase using the same pattern): at `phaseDeadlineAt` the server locks in whatever state it has actually received for that command — it never auto-fills, auto-generates, or copies prior-round data. Absent or partial submissions resolve as their natural "empty" outcome (no LP spent, missing queue slots skipped per the Battle execution order rule).
+
 ## Room commands and events
 
 ### Room commands
@@ -309,8 +319,9 @@ On reconnect, subscribe first, then request the public snapshot. Do not replay a
 | --- | --- | --- | --- | --- |
 | `JOIN_ROOM` | `/app/rooms/join` | `{ "roomCode": "A7K9Q2" }` | JWT; room exists; not full; not started | Private `JOIN_ROOM_ACCEPTED`, then public update |
 | `LEAVE_ROOM` | `/app/rooms/{roomId}/leave` | `{}` | Caller is a member; room not started | Public leave or close event |
+| `KICK_PLAYER` | `/app/rooms/{roomId}/kick` | `{ "targetPlayerId": "user-002" }` | Caller is host; target is a room member and not the caller; room not started | Public `PLAYER_KICKED`, room reverts to `WAITING_FOR_PLAYER` |
 | `SET_ROOM_READY` | `/app/rooms/{roomId}/ready` | `{ "ready": true }` | Member; room open; expected RV | Public readiness/state event |
-| `START_MATCH` | `/app/rooms/{roomId}/start` | `{}` | Caller is host; exactly two members; both ready; expected RV | Public `MATCH_CREATED` |
+| `START_MATCH` | `/app/rooms/{roomId}/start` | `{}` | Caller is host; exactly two members; both ready; both currently connected; expected RV | Public `MATCH_CREATED` |
 | `REQUEST_ROOM_SNAPSHOT` | `/app/rooms/{roomId}/request-snapshot` | `{}` | Caller is room member | Private `ROOM_SNAPSHOT` |
 
 ### Room events
@@ -322,6 +333,7 @@ On reconnect, subscribe first, then request the public snapshot. Do not replay a
 | `ROOM_STATE_UPDATED` | `/topic/rooms/{roomId}` | Both players | Complete room state |
 | `PLAYER_JOINED_ROOM` | `/topic/rooms/{roomId}` | Both players | Joining player and complete room state |
 | `PLAYER_LEFT_ROOM` | `/topic/rooms/{roomId}` | Remaining player | Left player ID and room state |
+| `PLAYER_KICKED` | `/topic/rooms/{roomId}` | Both players (kicked player receives it before their subscription is dropped) | Kicked player ID, reason, and updated room state |
 | `PLAYER_READY_CHANGED` | `/topic/rooms/{roomId}` | Both players | Player ID, readiness, and room state |
 | `ROOM_CLOSED` | `/topic/rooms/{roomId}` | Current subscribers | Closure reason |
 | `MATCH_CREATED` | `/topic/rooms/{roomId}` | Both players | `matchId`, `matchVersion`, initial phase |
@@ -347,7 +359,7 @@ The Support Order and its one Support Technique are chosen locally and submitted
 
 | Command | Payload | Phase and validation | Valid result | Invalid result |
 | --- | --- | --- | --- | --- |
-| `CONFIRM_SUPPORT_LOADOUT` | `{ "supportOrderId": "dragon-sword-order", "supportTechniqueId": "dragon-step" }` | `PRE_MATCH_SUPPORT_SELECTION`; existing Order and a Technique granted by it; current match version; caller is a player | Public `PLAYER_CONFIRMATION_CHANGED` with `kind: "SUPPORT_LOADOUT"`; after both confirmations, `SUPPORT_LOADOUT_RESOLVED`, then `RENEWAL_STARTED` | Private `COMMAND_REJECTED` |
+| `CONFIRM_SUPPORT_LOADOUT` | `{ "supportOrderId": "dragon-sword-order", "supportTechniqueId": "dragon-step" }` | `PRE_MATCH_SUPPORT_SELECTION`; existing Order and a Technique granted by it; `supportOrderId` may equal `mainOrderId`; `supportTechniqueId` must not duplicate a Technique already granted by the Main Order; current match version; caller is a player | Public `PLAYER_CONFIRMATION_CHANGED` with `kind: "SUPPORT_LOADOUT"`; after both confirmations, `SUPPORT_LOADOUT_RESOLVED`, then `RENEWAL_STARTED` | Private `COMMAND_REJECTED` |
 
 `SUPPORT_LOADOUT_RESOLVED` publicly includes both Support Orders, each selected Support Technique, and each player’s authoritative initial state/available Actions. The server derives the three Main Techniques from the selected Main Order’s configured Action set when building the final Action list; it does not accept a client-supplied stat or action list as authoritative.
 
@@ -419,6 +431,8 @@ Each player receives exactly 2 LP each round. An allocation can upgrade `STR`, `
 | --- | --- | --- | --- |
 | `CONFIRM_ASCENSION` | `allocations`; `ASCENSION`; exactly 2 LP; valid stat/Technique target; expected MV; caller is a player | Public `PLAYER_CONFIRMATION_CHANGED` with `kind: "ASCENSION"`; after both confirmations, `ASCENSION_RESOLVED`, then `ACTION_STRATEGY_STARTED` | Private `COMMAND_REJECTED` |
 
+**Timeout behavior.** At `phaseDeadlineAt`, the server locks the phase using whatever `CONFIRM_ASCENSION` state it has received — same rule as Action Strategy timeout, no auto-fill. A player who never confirmed is locked in with an empty allocation (0 LP spent, no Stat/Technique change that round). A player who confirmed a partial allocation (fewer than 2 LP spent) is locked in with only what was received; unspent LP is forfeited, not carried to the next round. `ASCENSION_RESOLVED` proceeds regardless, applying whatever each player locked in.
+
 `PLAYER_CONFIRMATION_CHANGED` may announce only `{ playerId, kind: "ASCENSION", confirmed: true }`. It must not include either allocation. `ASCENSION_RESOLVED` applies both allocations atomically, exposes official stats and learned/levelled Techniques, and advances the public version.
 
 ### Action Strategy
@@ -432,7 +446,11 @@ The player configures an ordered queue locally, then sends the complete queue in
 
 | Command | Payload and validation | Valid result | Invalid result |
 | --- | --- | --- | --- |
-| `CONFIRM_ACTION_QUEUE` | `actionIds`; `ACTION_STRATEGY`; exact required size; available Actions only; at most one old occurrence removed; retained order preserved; expected MV | Public `PLAYER_CONFIRMATION_CHANGED` with `kind: "ACTION_QUEUE"`; after both confirmations, `BATTLE_STARTED` | Private `COMMAND_REJECTED` |
+| `CONFIRM_ACTION_QUEUE` | `actionIds`; `ACTION_STRATEGY`; exact required size; available Actions only (an `actionId` may repeat); at most one old occurrence removed; retained order preserved; expected MV | Public `PLAYER_CONFIRMATION_CHANGED` with `kind: "ACTION_QUEUE"`; after both confirmations, `BATTLE_STARTED` | Private `COMMAND_REJECTED` |
+
+An `actionId` may appear more than once in the queue (e.g., queuing Quick Slash twice in one round). The server still validates, at Battle resolution time, that the player has sufficient MP/QP for each planned use — insufficient resource on a repeat use resolves as a failed Action per the Battle execution order rule, not a rejected queue.
+
+**Timeout behavior.** At `phaseDeadlineAt`, the server locks the phase using whatever `CONFIRM_ACTION_QUEUE` state it has received — it does not auto-fill missing slots with Basic Actions and does not copy the previous round's queue. A player who never confirmed is locked in with an empty queue; a player who confirmed with too few Actions is locked in with only what was received. `BATTLE_STARTED` proceeds regardless: missing slots are treated as empty positions and, per the Battle execution order rule, are skipped when their turn arrives — no Action is revealed for an empty slot, and execution passes straight to the opponent.
 
 ### Battle and match completion
 
@@ -485,9 +503,37 @@ When both queues are confirmed, the server creates a hidden execution plan from 
 }
 ```
 
-For a disconnect, the server publishes `PLAYER_CONNECTION_CHANGED` with `connected: false` and records the server time. If the player reconnects and authenticates as the same Principal within five minutes, it publishes `connected: true` and the client requests snapshots. At five minutes, if still disconnected, the server ends the match with `DISCONNECTED`, cancels future actions, and emits `MATCH_ENDED`.
+`battleLogEntry.status` is `"SUCCESS"` or `"FAILED"`. On `"FAILED"`, `battleLogEntry.failureReason` is `"INSUFFICIENT_RESOURCE"` or `"DISABLED_BY_EFFECT"`, `effects` is empty, and both state snapshots are unchanged from before the Action.
+
+```json
+{
+  "type": "ACTION_RESOLVED",
+  "matchId": "match-001",
+  "matchVersion": 32,
+  "serverTime": 1783770003000,
+  "payload": {
+    "executionId": "execution-002",
+    "actionId": "heaven-guard",
+    "battleLogEntry": { "status": "FAILED", "failureReason": "INSUFFICIENT_RESOURCE", "effects": [] },
+    "sourceStateAfter": { "str": 8, "hp": 120, "def": 4, "as": 5, "mp": 0, "qp": 0 },
+    "targetStateAfter": { "str": 7, "hp": 102, "def": 3, "as": 6, "mp": 30, "qp": 0 }
+  }
+}
+```
+
+Disconnect handling applies to the whole match lifecycle, not just Battle: from `MATCH_CREATED` through `GAME_OVER`, any STOMP disconnect for a match player immediately starts a 5-minute countdown, regardless of the current phase (`PRE_MATCH_MAIN_ORDER_SELECTION`, `PRE_MATCH_SUPPORT_SELECTION`, `RENEWAL`, `ASCENSION`, `ACTION_STRATEGY`, or `BATTLE`). The server publishes `PLAYER_CONNECTION_CHANGED` with `connected: false` and records the server time. If the player reconnects and authenticates as the same Principal within five minutes, the server publishes `connected: true` and the client requests snapshots. If five minutes elapse while still disconnected, the server ends the match with `DISCONNECTED` — the disconnected player loses — cancels any pending phase timers or Battle executions, and emits `MATCH_ENDED`.
 
 `SURRENDER` is accepted from any match player before `GAME_OVER`; it ends the match immediately with the opponent as winner. When `MATCH_ENDED` arrives, Redux stops local presentation timers and React Router navigates both clients to `/results/{matchId}`.
+
+### Surrender
+
+`SURRENDER` is valid from either match player in any phase except `GAME_OVER` — including pre-match selection, `RENEWAL`, `ASCENSION`, and `ACTION_STRATEGY`, not just `BATTLE`.
+
+| Command | Destination | Payload | Validation | Result |
+| --- | --- | --- | --- | --- |
+| `SURRENDER` | `/app/matches/{matchId}/surrender` | `{}` | Caller is a match player; current phase is not `GAME_OVER`; expected MV | Immediately ends the match: public `MATCH_ENDED` with `reason: "SURRENDER"`, opponent as winner |
+
+Surrendering cancels any in-flight phase timers, pending Battle executions, and outstanding confirmations for both players.
 
 ## Error codes
 
@@ -496,6 +542,7 @@ For a disconnect, the server publishes `PLAYER_CONNECTION_CHANGED` with `connect
 | `UNAUTHORIZED`, `TOKEN_EXPIRED`, `INVALID_TOKEN` | Authentication is absent, expired, or invalid |
 | `ROOM_NOT_FOUND`, `ROOM_FULL`, `ROOM_ALREADY_STARTED` | Room cannot be joined or used |
 | `PLAYER_NOT_IN_ROOM`, `NOT_ROOM_HOST`, `PLAYERS_NOT_READY` | Caller lacks room authority or start requirements fail |
+| `PLAYER_DISCONNECTED` | A room member is not currently WebSocket-connected; blocks `START_MATCH` |
 | `MATCH_NOT_FOUND`, `PLAYER_NOT_IN_MATCH`, `MATCH_NOT_FINISHED` | Match resource or membership is invalid |
 | `INVALID_MATCH_PHASE` | Command cannot run in current phase |
 | `STALE_ROOM_VERSION`, `STALE_MATCH_VERSION` | Caller must request/reconcile a snapshot |
