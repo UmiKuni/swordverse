@@ -1,56 +1,136 @@
 # SwordVerse API and WebSocket Contract
 
-## Purpose and scope
+## 1. Purpose and Scope
 
-This document defines the server-authoritative contract for SwordVerse 1.0, an online 1v1 round-based auto-combat game described in [README.md](README.md). It covers the React + TypeScript client (Redux Toolkit, RTK Query, React Router, STOMP.js) and the Spring Boot server (REST, STOMP over WebSocket, JWT).
+This document defines the public REST and STOMP-over-WebSocket contract between the SwordVerse React client and Spring Boot server.
 
-Only two players can participate in a room or a match. The contract covers authentication, private rooms, pre-match Order selection, round progression, auto-combat, reconnects, and match results. Matchmaking, ranking, spectators, chat, replay, guilds, shops, and other features are intentionally excluded.
+SwordVerse is a server-authoritative online 1v1 round-based auto-combat game. Clients submit player intent and render authoritative server responses. Clients must not calculate or submit official stats, resource changes, Action outcomes, Effect results, phase transitions, or match results.
 
-The server is authoritative. Clients submit player intent and render the returned state. Clients must not calculate or submit official damage, HP, STR, DEF, AS, MP, QP, effects, Action execution order, phase changes, or match results.
+The contract covers:
 
-## Game rules represented by the contract
+- Authentication and session renewal
+- Static Sect and Action data
+- Private 1v1 rooms
+- Main and Support loadout selection
+- Renewal, Ascension, Action Strategy, and Battle
+- Active Effects and Passive Action triggers
+- Reconnection, surrender, and match results
 
-### Orders, Techniques, and Actions
+Matchmaking, ranking, spectators, chat, replay, shops, and content versioning are outside the current scope.
 
-Each player first secretly selects one **Main Order**. Once both confirm, the server reveals both Main Orders. Each player then secretly selects one **Support Order** and exactly one **Support Technique** belonging to that Support Order. Once both confirm, the server reveals both support loadouts and builds each player's available Action list:
+---
+
+## 2. Conventions
+
+### 2.1 Transport
+
+- REST payloads use JSON and UTF-8.
+- Protected REST endpoints use `Authorization: Bearer <access-token>`.
+- WebSocket messaging uses STOMP over WSS in production.
+- Timestamps are Unix epoch milliseconds in UTC.
+- Identifiers are UUID strings.
+- JSON property names use `camelCase`.
+- Enum values use `UPPER_SNAKE_CASE`.
+- Missing optional values are represented by `null` or omitted as specified by the DTO.
+
+### 2.2 Action terminology
+
+The API always uses the term **Action**. An Action is the server-side gameplay entity represented as a selectable game card in the UI.
+
+Actions are classified independently:
 
 ```text
-Basic Actions + 3 Main Techniques + 1 Support Technique
+actionSource:
+- BASIC
+- SECT
+
+activationType:
+- ACTIVE
+- PASSIVE
 ```
 
-An Order supplies stats and Techniques. The public player state uses the README stat set:
-
-| Stat | Meaning |
-| --- | --- |
-| `STR` | Damage potential |
-| `HP` | Life; reaching zero loses the match |
-| `DEF` | Damage reduction |
-| `AS` | Attack speed used by server execution rules |
-| `MP` | Resource used by Actions |
-| `QP` | Resource used by selected Actions |
-
-The server owns all formulas and the exact rules by which stats, costs, effects, and Action order are resolved.
-
-### Match flow
+An Action may additionally have:
 
 ```text
-Login → WebSocket connect → Host or join room → both ready → match created
-→ Main Order selection → Support Order/Technique selection
-→ RENEWAL → ASCENSION → ACTION_STRATEGY → BATTLE
-→ RENEWAL (next round) or GAME_OVER
+isUltimate = true
 ```
 
-Each round has the four README phases:
+The English term **Ultimate** is used for `isUltimate`. The API does not use `Technique`, `Skill`, or `Card` as resource names.
 
-1. `RENEWAL`: server resolves active effects, converts remaining MP to QP at the Order-defined ratio, then fully restores MP.
-2. `ASCENSION`: each player builds a local 2 Learning Point (LP) allocation, then submits it once as a confirmation. Both allocations resolve simultaneously.
-3. `ACTION_STRATEGY`: each player builds a local Action Queue, then submits it once as a confirmation.
-4. `BATTLE`: the server reveals and resolves both players' Actions together, tick by tick, and emits the Battle Log.
+### 2.3 Standard REST response
 
-Action Queue length by round:
+Successful REST endpoints return the resource directly. Collection endpoints return:
 
-| Round | Required queue size |
-| ---: | ---: |
+```json
+{
+  "items": [],
+  "total": 0
+}
+```
+
+Errors use:
+
+```json
+{
+  "error": {
+    "code": "ACTION_NOT_FOUND",
+    "message": "The requested Action does not exist.",
+    "details": {
+      "actionId": "11111111-1111-1111-1111-111111111111"
+    },
+    "traceId": "7e44bb32-e5b2-45d3-b7f8-8c7e6a248890"
+  }
+}
+```
+
+---
+
+## 3. Core Game Rules
+
+### 3.1 Sect and Action selection
+
+Each Sect owns a configured set of Actions, normally around five.
+
+Each player selects:
+
+1. One Main Sect.
+2. Three distinct Actions belonging to the Main Sect.
+3. One Support Sect.
+4. One Action belonging to the Support Sect.
+
+The Support Sect may be the same as the Main Sect. The Support Action:
+
+- Must not duplicate any selected Main Action.
+- Must not be an Ultimate.
+- May be active or passive.
+
+After selection, each player has exactly five Action slots:
+
+```text
+BASIC
+MAIN_1
+MAIN_2
+MAIN_3
+SUPPORT
+```
+
+The Basic Action starts at level 1. Other Actions use:
+
+```text
+currentLevel = 0  -> locked
+currentLevel >= 1 -> unlocked
+```
+
+### 3.2 Action Queue
+
+Only unlocked Actions with `activationType = ACTIVE` may be placed in the Action Queue.
+
+An active Action slot may appear multiple times in the same queue. Passive Actions cannot be queued. They activate automatically when their configured gameplay-event conditions are satisfied.
+
+Required queue size:
+
+| Round | Size |
+|---:|---:|
 | 1 | 2 |
 | 2 | 3 |
 | 3 | 4 |
@@ -58,432 +138,992 @@ Action Queue length by round:
 | 5 | 6 |
 | 6+ | 7 |
 
-After round 1, a plan may remove at most one occurrence from the previous queue. The retained occurrences must keep their relative order; newly available Actions can be inserted at the beginning, end, or between retained occurrences.
+After round 1, at most one retained queue occurrence may be removed. Retained occurrences keep their relative order; newly selected Actions may be inserted anywhere.
 
-The match ends immediately when HP reaches zero, a player surrenders, or a player has stayed disconnected for more than five minutes. Result reasons are `HP_REACHED_ZERO`, `SURRENDER`, `DISCONNECTED`, and `DRAW`. `DRAW` applies when both players' HP reach zero within the same tick — with simultaneous resolution, this is possible and neither side is treated as the winner.
+### 3.3 Runtime resources
 
-### Battle execution order
+HP, MP, and QP have current and maximum values:
 
-Within a Round, both players' Action Queues execute in lockstep by position: the Action at index 0 of Player A's queue and index 0 of Player B's queue resolve together as one **tick**; then index 1; and so on, until both queues are exhausted. There is no turn alternation and no initiative — every tick involves both players simultaneously. An empty slot (from a timeout-locked queue) counts as "no Action" for that side that tick.
+```text
+0 <= current <= max
+```
 
-The outcome of a tick depends on the combination of both Actions, not either one in isolation — for example, two attacking Actions each damage the other player; an attack against a counter damages only the attacker; an attack against a guard damages neither player. These are only illustrative cases: Techniques cover a much wider range of effects (healing, resource restoration, Defense-ignoring damage, and other special interactions), and the server resolves the actual outcome of any pair of simultaneous Actions using each Action's configured effects — this is game-engine logic, not a fixed lookup of combat roles.
+Healing and restoration cannot exceed the current maximum. Effects may modify maximum values during a match.
 
-If a player's queued Action at a tick can't be afforded (insufficient MP/QP) or is disabled by an active effect, only that player's Action fails for the tick — it contributes no effect, while the opponent's Action (if any) still resolves normally against them.
+During Renewal, the server:
 
-## Authentication and transport
+1. Resolves Effects scheduled for `RENEWAL_START`.
+2. Converts remaining MP to QP using the Main Sect ratio without exceeding `qp.max`.
+3. Restores MP to `mp.max`.
+4. Resolves Effects scheduled for `RENEWAL_END`.
 
-### REST authentication
+### 3.4 Battle
 
-Protected REST calls send:
+Both Action Queues resolve simultaneously by zero-based position. One pair of positions is one tick. There is no initiative or alternating turn order.
+
+If an Action cannot pay its cost or is disabled, only that Action fails. The opposing Action continues to resolve.
+
+Passive Actions may trigger from gameplay events produced during resolution. Passive results are included in `TICK_RESOLVED`; passive Actions are never included as submitted queue entries.
+
+---
+
+## 4. Authentication
+
+### 4.1 Session model
+
+The server issues:
+
+- A short-lived signed JWT access token.
+- A rotating opaque refresh token.
+
+The access token contains `userId`, `sessionId`, and `exp`. For protected requests, the server verifies the signature and expiration, then requires the referenced session to be active and not revoked.
+
+Only refresh-token hashes are stored. A successful refresh revokes the submitted refresh token and creates a new token for the same session.
+
+### 4.2 Authentication endpoints
+
+#### Register
 
 ```http
-Authorization: Bearer <access-token>
+POST /api/auth/register
 Content-Type: application/json
 ```
 
-The server issues a short-lived JWT access token and a refresh token. All production traffic uses HTTPS.
+```json
+{
+  "username": "hai",
+  "password": "StrongPassword123!",
+  "displayName": "Hai"
+}
+```
 
-| Method | Path | Authentication | Request body | Success response | Errors |
-| --- | --- | --- | --- | --- | --- |
-| `POST` | `/api/auth/register` | None | `username`, `password` | `201` session | `VALIDATION_ERROR` |
-| `POST` | `/api/auth/login` | None | `username`, `password` | `200` session | `UNAUTHORIZED`, `VALIDATION_ERROR` |
-| `POST` | `/api/auth/refresh` | None | `refreshToken` | `200` rotated session | `TOKEN_EXPIRED`, `INVALID_TOKEN` |
-| `POST` | `/api/auth/logout` | Bearer | `refreshToken` | `204` | `UNAUTHORIZED`, `INVALID_TOKEN` |
-| `GET` | `/api/auth/me` | Bearer | None | `200` current user | `UNAUTHORIZED`, `TOKEN_EXPIRED`, `INVALID_TOKEN` |
+Response `201 Created`:
 
 ```json
-// POST /api/auth/login request
-{ "username": "Hai", "password": "StrongPassword123!" }
-
-// register, login, or refresh success response
 {
   "accessToken": "jwt-access-token",
-  "refreshToken": "refresh-token",
-  "user": { "userId": "user-001", "username": "Hai" }
-}
-```
-
-### STOMP connection
-
-The client connects only after authentication, using the `/ws` endpoint. The JWT belongs in the STOMP `CONNECT` headers:
-
-```ts
-const stompClient = new Client({
-  brokerURL: 'wss://api.example.com/ws',
-  connectHeaders: { Authorization: `Bearer ${accessToken}` },
-});
-```
-
-The server validates the token on `CONNECT` and constructs the Spring `Principal`. Every handler derives the player identity from that `Principal`; it must ignore any client-provided player ID. In production, use WSS.
-
-**Token refresh during an open connection.** The STOMP session is validated only at `CONNECT` and is unaffected by the access token expiring afterward — the client refreshes it in the background via `POST /api/auth/refresh` over REST, and the existing WebSocket connection stays open and authenticated as-is. The refreshed token is only required the next time the client performs a new `CONNECT` (e.g., reconnecting after a network drop); it is never pushed into or re-validated against an already-open STOMP session.
-
-## REST APIs
-
-### Static game data
-
-The client uses these read-only endpoints to show selections and tooltips. Static definitions must include enough display metadata, but not server-only combat formulas.
-
-| Method | Path | Authentication | Request body | Success response | Errors |
-| --- | --- | --- | --- | --- | --- |
-| `GET` | `/api/orders` | Bearer | None | `200` Order summaries | `UNAUTHORIZED` |
-| `GET` | `/api/orders/{orderId}` | Bearer | None | `200` Order detail | `UNAUTHORIZED`, `ORDER_NOT_FOUND` |
-| `GET` | `/api/techniques` | Bearer | None | `200` Technique summaries | `UNAUTHORIZED` |
-| `GET` | `/api/techniques/{techniqueId}` | Bearer | None | `200` Technique detail | `UNAUTHORIZED`, `TECHNIQUE_NOT_FOUND` |
-| `GET` | `/api/basic-actions` | Bearer | None | `200` Basic Action definitions | `UNAUTHORIZED` |
-
-```json
-// GET /api/orders/heaven-sword-order
-{
-  "orderId": "heaven-sword-order",
-  "name": "Heaven Sword",
-  "description": "A balanced sword school.",
-  "statBonuses": { "str": 3, "hp": 20, "def": 2, "as": 1, "mp": 10, "qp": 0 },
-  "techniqueIds": ["quick-slash", "heaven-guard", "sky-piercer"],
-  "mpToQpRatio": 2
-}
-```
-
-```json
-// GET /api/techniques/quick-slash
-{
-  "techniqueId": "quick-slash",
-  "name": "Quick Slash",
-  "description": "A swift sword attack.",
-  "cost": { "resource": "MP", "amount": 8 },
-  "maxLevel": 3,
-  "sourceOrderIds": ["heaven-sword-order"],
-  "levelUpCost": [1, 2, 3]
-}
-```
-
-```json
-// GET /api/basic-actions
-[
-  { "actionId": "basic-strike", "name": "Basic Strike", "description": "A standard attack." },
-  { "actionId": "basic-guard", "name": "Basic Guard", "description": "A defensive stance." }
-]
-```
-
-`levelUpCost` is the Learning Point cost to learn/level this Technique, indexed by target level (index 0 = cost to learn level 1). Orders and stats also expose LP cost data for Ascension: an Order's stat bonuses and the global `statUpgradeCost` per stat are used by the client to render and locally validate an Ascension allocation before confirming.
-
-### Room APIs
-
-Creating a room makes the caller its host and first player. A room has a maximum of two players. Joining can use REST or the equivalent STOMP command; when a client is WebSocket-connected, successful joining also emits the private `JOIN_ROOM_ACCEPTED` event before the public update.
-
-| Method | Path | Authentication | Request body | Success response | Errors |
-| --- | --- | --- | --- | --- | --- |
-| `POST` | `/api/rooms` | Bearer | None | `201` room | `UNAUTHORIZED`, `VALIDATION_ERROR` |
-| `POST` | `/api/rooms/join` | Bearer | `roomCode` | `200` accepted room | `ROOM_NOT_FOUND`, `ROOM_FULL`, `ROOM_ALREADY_STARTED` |
-| `GET` | `/api/rooms/{roomId}` | Bearer + membership | None | `200` current room | `ROOM_NOT_FOUND`, `PLAYER_NOT_IN_ROOM` |
-
-```json
-// POST /api/rooms response
-{
-  "roomId": "room-001",
-  "roomCode": "A7K9Q2",
-  "roomVersion": 1,
-  "status": "WAITING_FOR_PLAYER",
-  "hostPlayerId": "user-001",
-  "players": [{ "playerId": "user-001", "username": "Hai", "ready": false }]
-}
-```
-
-```json
-// POST /api/rooms/join request and response
-{ "roomCode": "A7K9Q2" }
-
-{
-  "roomId": "room-001",
-  "roomCode": "A7K9Q2",
-  "roomVersion": 2,
-  "status": "OPEN",
-  "hostPlayerId": "user-001",
-  "players": [
-    { "playerId": "user-001", "username": "Hai", "ready": false },
-    { "playerId": "user-002", "username": "Linh", "ready": false }
-  ]
-}
-```
-
-### Match APIs
-
-Only a match player can read these resources. The regular match response is a public snapshot: it includes no opponent's unrevealed selection or Action Queue.
-
-| Method | Path | Authentication | Request body | Success response | Errors |
-| --- | --- | --- | --- | --- | --- |
-| `GET` | `/api/matches/{matchId}` | Bearer + membership | None | `200` public match snapshot | `MATCH_NOT_FOUND`, `PLAYER_NOT_IN_MATCH` |
-| `GET` | `/api/matches/{matchId}/result` | Bearer + membership | None | `200` terminal result | `MATCH_NOT_FOUND`, `PLAYER_NOT_IN_MATCH`, `MATCH_NOT_FINISHED` |
-
-```json
-// GET /api/matches/match-001/result
-{
-  "matchId": "match-001",
-  "matchVersion": 41,
-  "winnerPlayerId": "user-001",
-  "loserPlayerId": "user-002",
-  "reason": "HP_REACHED_ZERO",
-  "endedAt": 1783770101500,
-  "finalPlayers": [
-    { "playerId": "user-001", "state": { "hp": 18, "mp": 30, "qp": 9 } },
-    { "playerId": "user-002", "state": { "hp": 0, "mp": 12, "qp": 2 } }
-  ]
-}
-```
-
-When `reason` is `"DRAW"`, both `winnerPlayerId` and `loserPlayerId` are `null`.
-
-### REST error body
-
-```json
-{
-  "error": {
-    "code": "ROOM_FULL",
-    "message": "The room already has two players.",
-    "details": { "roomCode": "A7K9Q2" },
-    "traceId": "trace-uuid"
+  "accessTokenExpiresAt": 1783770900000,
+  "refreshToken": "opaque-refresh-token",
+  "refreshTokenExpiresAt": 1784374800000,
+  "sessionId": "3db08711-f29f-45fd-a579-2b53ec79d21e",
+  "user": {
+    "userId": "d6968bcb-fb39-48ff-8b6f-813132577c28",
+    "username": "hai",
+    "displayName": "Hai"
   }
 }
 ```
 
-## STOMP destinations
+Errors: `USERNAME_ALREADY_EXISTS`, `VALIDATION_ERROR`.
 
-| Direction | Destination | Contract |
-| --- | --- | --- |
-| Client → server | `/app/rooms/join` | Join a room with a room code |
-| Client → server | `/app/rooms/{roomId}/leave` | Leave an unstarted room |
-| Client → server | `/app/rooms/{roomId}/ready` | Set caller readiness |
-| Client → server | `/app/rooms/{roomId}/kick` | Host removes a player from an unstarted room |
-| Client → server | `/app/rooms/{roomId}/start` | Host starts a two-player ready room |
-| Client → server | `/app/rooms/{roomId}/request-snapshot` | Request caller's room snapshot |
-| Client → server | `/app/matches/{matchId}/confirm-main-order` | Confirm a secret Main Order |
-| Client → server | `/app/matches/{matchId}/confirm-support-loadout` | Confirm a secret Support Order and Support Technique |
-| Client → server | `/app/matches/{matchId}/confirm-ascension` | Confirm the complete LP allocation |
-| Client → server | `/app/matches/{matchId}/confirm-action-queue` | Confirm the complete Action Queue |
-| Client → server | `/app/matches/{matchId}/request-snapshot` | Request public match snapshot |
-| Client → server | `/app/matches/{matchId}/surrender` | Caller surrenders |
-| Server → client | `/topic/rooms/{roomId}` | Public room events for room players |
-| Server → client | `/topic/matches/{matchId}` | Public match events for both players |
-| Server → client | `/user/queue/room-events` | Private room response/snapshot for the authenticated user |
-| Server → client | `/user/queue/errors` | Private error when no domain stream is appropriate |
+#### Login
 
-The server maps `/user/queue/...` through the JWT `Principal`. A client subscribes only to the literal user destination and cannot select a recipient. The server must authorize room/match topic subscriptions by membership.
-
-## Message envelopes and consistency
-
-All client messages use `ClientCommand`. `roomId` is present only on room commands, and `matchId` only on match commands. `expectedRoomVersion` or `expectedMatchVersion` is mandatory for mutating commands; snapshot commands may omit it.
+```http
+POST /api/auth/login
+Content-Type: application/json
+```
 
 ```json
 {
-  "commandId": "92e72a9b-6e7d-4be5-bc87-37fc7aa5f2aa",
+  "username": "hai",
+  "password": "StrongPassword123!"
+}
+```
+
+Response `200 OK`: `AuthSessionResponse`, identical to the register response.
+
+Errors: `INVALID_CREDENTIALS`, `VALIDATION_ERROR`.
+
+#### Refresh
+
+```http
+POST /api/auth/refresh
+Content-Type: application/json
+```
+
+```json
+{
+  "refreshToken": "opaque-refresh-token"
+}
+```
+
+Response `200 OK`: rotated `AuthSessionResponse`.
+
+Errors: `INVALID_TOKEN`, `TOKEN_EXPIRED`, `SESSION_REVOKED`, `TOKEN_REUSE_DETECTED`.
+
+#### Logout
+
+```http
+POST /api/auth/logout
+Authorization: Bearer <access-token>
+Content-Type: application/json
+```
+
+```json
+{
+  "refreshToken": "opaque-refresh-token"
+}
+```
+
+Response: `204 No Content`.
+
+Logout revokes the session, revokes its active refresh tokens, and closes WebSocket connections associated with that session.
+
+#### Current user
+
+```http
+GET /api/auth/me
+Authorization: Bearer <access-token>
+```
+
+Response `200 OK`:
+
+```json
+{
+  "userId": "d6968bcb-fb39-48ff-8b6f-813132577c28",
+  "username": "hai",
+  "displayName": "Hai"
+}
+```
+
+Errors: `UNAUTHORIZED`, `TOKEN_EXPIRED`, `SESSION_REVOKED`.
+
+---
+
+## 5. Static Game Data APIs
+
+Static endpoints expose display and selection data. They do not expose server-only handler keys or internal Effect component configuration.
+
+### 5.1 List Sects
+
+```http
+GET /api/sects
+Authorization: Bearer <access-token>
+```
+
+Response `200 OK`:
+
+```json
+{
+  "items": [
+    {
+      "sectId": "fdb55783-b0d7-4f74-9ac6-6fb587783ac8",
+      "sectType": "HEAVEN_SWORD",
+      "name": "Heaven Sword",
+      "description": "A balanced Sect focused on precise attacks.",
+      "keywords": ["balanced", "precision"],
+      "mainBaseStats": {
+        "str": 8,
+        "hp": 100,
+        "def": 4,
+        "as": 5,
+        "mp": 30,
+        "qp": 10
+      },
+      "supportBonusStats": {
+        "str": 2,
+        "hp": 10,
+        "def": 1,
+        "as": 0,
+        "mp": 5,
+        "qp": 0
+      },
+      "mpToQpRatio": 2.0
+    }
+  ],
+  "total": 1
+}
+```
+
+### 5.2 Get Sect details
+
+```http
+GET /api/sects/{sectId}
+Authorization: Bearer <access-token>
+```
+
+Response `200 OK`:
+
+```json
+{
+  "sectId": "fdb55783-b0d7-4f74-9ac6-6fb587783ac8",
+  "sectType": "HEAVEN_SWORD",
+  "name": "Heaven Sword",
+  "description": "A balanced Sect focused on precise attacks.",
+  "keywords": ["balanced", "precision"],
+  "mainBaseStats": {
+    "str": 8,
+    "hp": 100,
+    "def": 4,
+    "as": 5,
+    "mp": 30,
+    "qp": 10
+  },
+  "supportBonusStats": {
+    "str": 2,
+    "hp": 10,
+    "def": 1,
+    "as": 0,
+    "mp": 5,
+    "qp": 0
+  },
+  "mpToQpRatio": 2.0,
+  "actions": [
+    {
+      "actionId": "22172357-3371-4aa7-8641-d44b9405db98",
+      "actionKey": "QUICK_SLASH",
+      "name": "Quick Slash",
+      "description": "A fast sword strike.",
+      "actionSource": "SECT",
+      "activationType": "ACTIVE",
+      "isUltimate": false,
+      "maxLevel": 3
+    },
+    {
+      "actionId": "74fd7785-e24b-4de5-8f97-2bd990f8ab90",
+      "actionKey": "HEAVENLY_EXECUTION",
+      "name": "Heavenly Execution",
+      "description": "The Ultimate Action of Heaven Sword.",
+      "actionSource": "SECT",
+      "activationType": "ACTIVE",
+      "isUltimate": true,
+      "maxLevel": 3
+    }
+  ]
+}
+```
+
+Errors: `SECT_NOT_FOUND`.
+
+### 5.3 List Actions
+
+```http
+GET /api/actions?actionSource=SECT&activationType=PASSIVE&sectId={sectId}
+Authorization: Bearer <access-token>
+```
+
+All query parameters are optional.
+
+Response `200 OK`:
+
+```json
+{
+  "items": [
+    {
+      "actionId": "0c949f1c-5731-45f8-a7ec-e6a2618dd80e",
+      "actionKey": "SWORD_INSTINCT",
+      "name": "Sword Instinct",
+      "description": "Triggers after three successful hits.",
+      "actionSource": "SECT",
+      "activationType": "PASSIVE",
+      "isUltimate": false,
+      "maxLevel": 3,
+      "sectIds": ["fdb55783-b0d7-4f74-9ac6-6fb587783ac8"]
+    }
+  ],
+  "total": 1
+}
+```
+
+Errors: `INVALID_FILTER`, `SECT_NOT_FOUND`.
+
+### 5.4 Get Action details
+
+```http
+GET /api/actions/{actionId}
+Authorization: Bearer <access-token>
+```
+
+Response `200 OK`:
+
+```json
+{
+  "actionId": "22172357-3371-4aa7-8641-d44b9405db98",
+  "actionKey": "QUICK_SLASH",
+  "name": "Quick Slash",
+  "description": "A fast sword strike.",
+  "actionSource": "SECT",
+  "activationType": "ACTIVE",
+  "isUltimate": false,
+  "sectIds": ["fdb55783-b0d7-4f74-9ac6-6fb587783ac8"],
+  "levels": [
+    {
+      "level": 1,
+      "learningPointCost": 1,
+      "costs": [
+        {
+          "resourceType": "MP",
+          "calculationType": "FLAT",
+          "value": 8
+        }
+      ],
+      "publicEffects": [
+        {
+          "name": "Deal damage",
+          "description": "Deals damage to the opponent."
+        }
+      ]
+    }
+  ]
+}
+```
+
+Errors: `ACTION_NOT_FOUND`.
+
+---
+
+## 6. Room REST APIs
+
+### 6.1 Create room
+
+```http
+POST /api/rooms
+Authorization: Bearer <access-token>
+```
+
+Response `201 Created`:
+
+```json
+{
+  "roomId": "14dcc51b-a34e-4ad8-96da-e0a22f3f3503",
+  "roomCode": "A7K9Q2",
+  "status": "WAITING_FOR_PLAYER",
+  "playerA": {
+    "userId": "d6968bcb-fb39-48ff-8b6f-813132577c28",
+    "username": "hai",
+    "ready": false,
+    "connected": true
+  },
+  "playerB": null
+}
+```
+
+### 6.2 Join room
+
+```http
+POST /api/rooms/join
+Authorization: Bearer <access-token>
+Content-Type: application/json
+```
+
+```json
+{
+  "roomCode": "A7K9Q2"
+}
+```
+
+Response `200 OK`: complete `RoomState`.
+
+Errors: `ROOM_NOT_FOUND`, `ROOM_FULL`, `ROOM_ALREADY_STARTED`, `ALREADY_IN_ROOM`.
+
+### 6.3 Get room
+
+```http
+GET /api/rooms/{roomId}
+Authorization: Bearer <access-token>
+```
+
+Response `200 OK`: complete `RoomState`.
+
+Errors: `ROOM_NOT_FOUND`, `PLAYER_NOT_IN_ROOM`.
+
+---
+
+## 7. Match REST APIs
+
+### 7.1 Get match snapshot
+
+```http
+GET /api/matches/{matchId}
+Authorization: Bearer <access-token>
+```
+
+Response `200 OK`:
+
+```json
+{
+  "matchId": "8262bd3a-8ad5-41b6-baf1-5e356b0ef937",
+  "status": "IN_PROGRESS",
+  "phase": "ACTION_STRATEGY",
+  "roundNumber": 2,
+  "tickIndex": 0,
+  "phaseStartedAt": 1783770000000,
+  "phaseDeadlineAt": 1783770030000,
+  "players": [
+    {
+      "playerId": "5ab5cf4a-dc55-4130-b8e2-5b7751b091e0",
+      "userId": "d6968bcb-fb39-48ff-8b6f-813132577c28",
+      "seat": "PLAYER_A",
+      "connected": true,
+      "mainSectId": "fdb55783-b0d7-4f74-9ac6-6fb587783ac8",
+      "supportSectId": "0bdca6ea-dd91-40e9-bd81-c7fc0ba15875",
+      "state": {
+        "str": 10,
+        "def": 5,
+        "as": 5,
+        "hp": { "current": 92, "max": 110 },
+        "mp": { "current": 30, "max": 35 },
+        "qp": { "current": 6, "max": 10 }
+      },
+      "actionSlots": [
+        {
+          "actionSlotId": "863cda43-a4bf-4fd9-858a-715cc46fe982",
+          "slotType": "BASIC",
+          "actionId": "737cb9aa-f0c8-4180-a9c8-a94fe9e0de7d",
+          "activationType": "ACTIVE",
+          "isUltimate": false,
+          "currentLevel": 1
+        },
+        {
+          "actionSlotId": "18a9a33b-ff9a-4519-8fbc-04f70c522c79",
+          "slotType": "MAIN_1",
+          "actionId": "22172357-3371-4aa7-8641-d44b9405db98",
+          "activationType": "ACTIVE",
+          "isUltimate": false,
+          "currentLevel": 1
+        },
+        {
+          "actionSlotId": "3e6bb0ea-bda5-4559-b8fc-559feeaedf28",
+          "slotType": "MAIN_2",
+          "actionId": "0c949f1c-5731-45f8-a7ec-e6a2618dd80e",
+          "activationType": "PASSIVE",
+          "isUltimate": false,
+          "currentLevel": 1
+        },
+        {
+          "actionSlotId": "a6e8d004-a1cb-480e-87cb-8947e2a3ac33",
+          "slotType": "MAIN_3",
+          "actionId": "74fd7785-e24b-4de5-8f97-2bd990f8ab90",
+          "activationType": "ACTIVE",
+          "isUltimate": true,
+          "currentLevel": 0
+        },
+        {
+          "actionSlotId": "310fe49f-b93b-4684-a1fe-f28588865757",
+          "slotType": "SUPPORT",
+          "actionId": "dc0d8d97-7a73-454f-ab90-57d16948ca15",
+          "activationType": "PASSIVE",
+          "isUltimate": false,
+          "currentLevel": 0
+        }
+      ],
+      "activeEffects": [],
+      "ascensionConfirmed": false,
+      "actionQueueConfirmed": false
+    }
+  ]
+}
+```
+
+Secret selections, pending Ascension allocations, and unrevealed queues belonging to the opponent are omitted.
+
+Errors: `MATCH_NOT_FOUND`, `PLAYER_NOT_IN_MATCH`.
+
+### 7.2 Get match result
+
+```http
+GET /api/matches/{matchId}/result
+Authorization: Bearer <access-token>
+```
+
+Response `200 OK`:
+
+```json
+{
+  "matchId": "8262bd3a-8ad5-41b6-baf1-5e356b0ef937",
+  "winnerPlayerId": "5ab5cf4a-dc55-4130-b8e2-5b7751b091e0",
+  "loserPlayerId": "37f622bf-7200-4cdc-b8bf-918737abe778",
+  "reason": "HP_REACHED_ZERO",
+  "endedAt": 1783770101500,
+  "finalPlayers": [
+    {
+      "playerId": "5ab5cf4a-dc55-4130-b8e2-5b7751b091e0",
+      "state": {
+        "hp": { "current": 18, "max": 110 },
+        "mp": { "current": 22, "max": 35 },
+        "qp": { "current": 9, "max": 10 }
+      }
+    }
+  ]
+}
+```
+
+For `DRAW`, `winnerPlayerId` and `loserPlayerId` are null.
+
+Errors: `MATCH_NOT_FOUND`, `PLAYER_NOT_IN_MATCH`, `MATCH_NOT_FINISHED`.
+
+---
+
+## 8. WebSocket Transport
+
+### 8.1 Connection
+
+Endpoint:
+
+```text
+/ws
+```
+
+STOMP `CONNECT` header:
+
+```text
+Authorization: Bearer <access-token>
+```
+
+The server verifies the JWT and active session, then creates the Spring `Principal`. Handlers derive player identity exclusively from `Principal`.
+
+Access-token expiry does not terminate an established connection. Explicit logout or session revocation closes every connection associated with that session.
+
+### 8.2 Destinations
+
+| Direction | Destination | Purpose |
+|---|---|---|
+| Subscribe | `/user/queue/room-events` | Private room results and rejections. |
+| Subscribe | `/user/queue/match-events` | Private match results and rejections. |
+| Subscribe | `/topic/rooms/{roomId}` | Public room events. |
+| Subscribe | `/topic/matches/{matchId}` | Public match events. |
+| Send | `/app/rooms/{roomId}/ready` | Update readiness. |
+| Send | `/app/rooms/{roomId}/leave` | Leave the room. |
+| Send | `/app/rooms/{roomId}/kick` | Host removes Player B. |
+| Send | `/app/rooms/{roomId}/start` | Start the match. |
+| Send | `/app/rooms/{roomId}/request-snapshot` | Request private room snapshot. |
+| Send | `/app/matches/{matchId}/confirm-main-loadout` | Confirm Main Sect and three Main Actions. |
+| Send | `/app/matches/{matchId}/confirm-support-loadout` | Confirm Support Sect and Support Action. |
+| Send | `/app/matches/{matchId}/confirm-ascension` | Confirm Ascension allocation. |
+| Send | `/app/matches/{matchId}/confirm-action-queue` | Confirm Action Queue. |
+| Send | `/app/matches/{matchId}/surrender` | Surrender. |
+| Send | `/app/matches/{matchId}/request-snapshot` | Request private match snapshot. |
+
+### 8.3 Client command envelope
+
+```json
+{
+  "commandId": "77e99328-7e61-4e84-aa93-73f9a8379451",
   "type": "CONFIRM_ACTION_QUEUE",
-  "matchId": "match-001",
-  "expectedMatchVersion": 18,
   "clientTime": 1783770000000,
   "payload": {}
 }
 ```
 
-All server messages use `ServerEvent`. Room public events carry `roomVersion`; match public events carry `matchVersion`. This simplified contract has no server-stored editable drafts, so it does not use a private revision.
+`commandId` is used for in-process duplicate protection. A client must reuse the same ID only when retrying the same command.
+
+### 8.4 Server event envelope
 
 ```json
 {
-  "eventId": "7cc89d86-daf3-4dd1-a8ad-34bf64bbef82",
-  "type": "ACTION_RESOLVED",
-  "matchId": "match-001",
-  "matchVersion": 30,
+  "eventId": "189a4f5c-65b6-4e84-87eb-380252f0dca9",
+  "type": "TICK_RESOLVED",
+  "matchId": "8262bd3a-8ad5-41b6-baf1-5e356b0ef937",
   "serverTime": 1783770001500,
-  "correlationId": "92e72a9b-6e7d-4be5-bc87-37fc7aa5f2aa",
+  "correlationId": "77e99328-7e61-4e84-aa93-73f9a8379451",
   "payload": {}
 }
 ```
 
-`roomVersion` increments for each public room change. `matchVersion` increments for each public match change, including a player confirmation, each phase transition, and each Battle event.
+The current schema does not persist event history. On reconnect, the client subscribes and requests a fresh snapshot; it does not request event replay.
 
-For a public reducer:
+---
+
+## 9. Room Commands and Events
+
+### 9.1 Set readiness
+
+Destination:
 
 ```text
-event.version <= currentVersion       ignore as old or duplicate
-event.version == currentVersion + 1   apply
-event.version > currentVersion + 1    request a snapshot; do not infer missing state
+/app/rooms/{roomId}/ready
 ```
 
-Use a snapshot when entering, reloading, reconnecting, or detecting a version gap:
+Payload:
 
-| Event | Destination | Contents |
-| --- | --- | --- |
-| `ROOM_SNAPSHOT` | `/user/queue/room-events` | Complete current public room state |
-| `MATCH_SNAPSHOT` | `/topic/matches/{matchId}` | Complete current public match state |
+```json
+{
+  "ready": true
+}
+```
 
-On reconnect, subscribe first, then request the public snapshot. Do not replay an earlier confirmation command automatically.
+Success event:
 
-**General timeout rule.** This applies to every confirmation-based phase (`ASCENSION`, `ACTION_STRATEGY`, and any future phase using the same pattern): at `phaseDeadlineAt` the server locks in whatever state it has actually received for that command — it never auto-fills, auto-generates, or copies prior-round data. Absent or partial submissions resolve as their natural "empty" outcome (no LP spent, missing queue slots skipped per the Battle execution order rule).
+```json
+{
+  "type": "ROOM_STATE_UPDATED",
+  "roomId": "14dcc51b-a34e-4ad8-96da-e0a22f3f3503",
+  "payload": {
+    "room": {
+      "roomId": "14dcc51b-a34e-4ad8-96da-e0a22f3f3503",
+      "roomCode": "A7K9Q2",
+      "status": "OPEN",
+      "playerA": {
+        "userId": "d6968bcb-fb39-48ff-8b6f-813132577c28",
+        "username": "hai",
+        "ready": true,
+        "connected": true
+      },
+      "playerB": null
+    }
+  }
+}
+```
 
-## Room commands and events
+### 9.2 Leave room
 
-### Room commands
+Payload:
 
-| Type | Destination | Payload | Validation | Result |
-| --- | --- | --- | --- | --- |
-| `JOIN_ROOM` | `/app/rooms/join` | `{ "roomCode": "A7K9Q2" }` | JWT; room exists; not full; not started | Private `JOIN_ROOM_ACCEPTED`, then public update |
-| `LEAVE_ROOM` | `/app/rooms/{roomId}/leave` | `{}` | Caller is a member; room not started | Public leave or close event |
-| `SET_ROOM_READY` | `/app/rooms/{roomId}/ready` | `{ "ready": true }` | Member; room open; expected RV | Public readiness/state event |
-| `KICK_PLAYER` | `/app/rooms/{roomId}/kick` | `{ "targetPlayerId": "user-002" }` | Caller is host; target is a room member and not the caller; room not started | Public `PLAYER_KICKED`, room reverts to `WAITING_FOR_PLAYER` |
-| `START_MATCH` | `/app/rooms/{roomId}/start` | `{}` | Caller is host; exactly two members; both ready; both currently connected; expected RV | Public `MATCH_CREATED` |
-| `REQUEST_ROOM_SNAPSHOT` | `/app/rooms/{roomId}/request-snapshot` | `{}` | Caller is room member | Private `ROOM_SNAPSHOT` |
+```json
+{}
+```
 
-### Room events
+Events: `PLAYER_LEFT_ROOM`, followed by `ROOM_STATE_UPDATED` or `ROOM_CLOSED`.
 
-| Type | Destination | Visibility | Payload |
-| --- | --- | --- | --- |
-| `JOIN_ROOM_ACCEPTED` | `/user/queue/room-events` | Joiner | Complete room state |
-| `ROOM_SNAPSHOT` | `/user/queue/room-events` | Requester | Complete room state |
-| `ROOM_STATE_UPDATED` | `/topic/rooms/{roomId}` | Both players | Complete room state |
-| `PLAYER_JOINED_ROOM` | `/topic/rooms/{roomId}` | Both players | Joining player and complete room state |
-| `PLAYER_LEFT_ROOM` | `/topic/rooms/{roomId}` | Remaining player | Left player ID and room state |
-| `PLAYER_READY_CHANGED` | `/topic/rooms/{roomId}` | Both players | Player ID, readiness, and room state |
-| `PLAYER_KICKED` | `/topic/rooms/{roomId}` | Both players (kicked player receives it before their subscription is dropped) | Kicked player ID, reason, and updated room state |
-| `ROOM_CLOSED` | `/topic/rooms/{roomId}` | Current subscribers | Closure reason |
-| `MATCH_CREATED` | `/topic/rooms/{roomId}` | Both players | `matchId`, `matchVersion`, initial phase |
-| `COMMAND_REJECTED` | `/user/queue/room-events` | Caller | Error code/message/correlation ID |
+If Player A leaves before the match starts and Player B remains, Player B is promoted to Player A by the server.
 
-After `MATCH_CREATED`, both clients navigate to `/battle/{matchId}`, subscribe to `/topic/matches/{matchId}`, and request both snapshots.
+### 9.3 Kick player
 
-## Pre-match selection contract
+Payload:
 
-### Main Order selection
+```json
+{
+  "targetUserId": "01c8bdf1-1ab9-48df-9faf-c4d60b1b323c"
+}
+```
 
-The Main Order picker is entirely client-local until the player presses Confirm. There is one command, not a select/save command followed by another confirm command.
+Events: private `PLAYER_KICKED` to the removed player and public `ROOM_STATE_UPDATED`.
 
-| Command | Payload | Phase and validation | Valid result | Invalid result |
-| --- | --- | --- | --- | --- |
-| `CONFIRM_MAIN_ORDER` | `{ "mainOrderId": "heaven-sword-order" }` | `PRE_MATCH_MAIN_ORDER_SELECTION`; valid existing Order; current match version; caller is a player | Public `PLAYER_CONFIRMATION_CHANGED` with `kind: "MAIN_ORDER"`; after both confirmations, `MAIN_ORDER_SELECTION_RESOLVED` | Private `COMMAND_REJECTED` |
+Errors: `NOT_ROOM_HOST`, `PLAYER_NOT_IN_ROOM`, `ROOM_ALREADY_STARTED`.
 
-`MAIN_ORDER_SELECTION_RESOLVED` is public and includes both Main Order details and the next phase. Before resolution, the public confirmation event contains no Order ID.
+### 9.4 Start match
 
-### Support loadout selection
+Payload:
 
-The Support Order and its one Support Technique are chosen locally and submitted together in one command.
+```json
+{}
+```
 
-| Command | Payload | Phase and validation | Valid result | Invalid result |
-| --- | --- | --- | --- | --- |
-| `CONFIRM_SUPPORT_LOADOUT` | `{ "supportOrderId": "dragon-sword-order", "supportTechniqueId": "dragon-step" }` | `PRE_MATCH_SUPPORT_SELECTION`; existing Order and a Technique granted by it; `supportOrderId` may equal `mainOrderId`; `supportTechniqueId` must not duplicate a Technique already granted by the Main Order; current match version; caller is a player | Public `PLAYER_CONFIRMATION_CHANGED` with `kind: "SUPPORT_LOADOUT"`; after both confirmations, `SUPPORT_LOADOUT_RESOLVED`, then `RENEWAL_STARTED` | Private `COMMAND_REJECTED` |
+Success event:
 
-`SUPPORT_LOADOUT_RESOLVED` publicly includes both Support Orders, each selected Support Technique, and each player’s authoritative initial state/available Actions. The server derives the three Main Techniques from the selected Main Order’s configured Action set when building the final Action list; it does not accept a client-supplied stat or action list as authoritative.
+```json
+{
+  "type": "MATCH_CREATED",
+  "roomId": "14dcc51b-a34e-4ad8-96da-e0a22f3f3503",
+  "matchId": "8262bd3a-8ad5-41b6-baf1-5e356b0ef937",
+  "payload": {
+    "phase": "PRE_MATCH_MAIN_SECT_SELECTION"
+  }
+}
+```
+
+Errors: `NOT_ROOM_HOST`, `PLAYERS_NOT_READY`, `PLAYER_DISCONNECTED`.
+
+---
+
+## 10. Pre-Match Selection
+
+### 10.1 Confirm Main loadout
+
+Destination:
+
+```text
+/app/matches/{matchId}/confirm-main-loadout
+```
+
+Payload:
+
+```json
+{
+  "mainSectId": "fdb55783-b0d7-4f74-9ac6-6fb587783ac8",
+  "mainActionIds": [
+    "22172357-3371-4aa7-8641-d44b9405db98",
+    "0c949f1c-5731-45f8-a7ec-e6a2618dd80e",
+    "74fd7785-e24b-4de5-8f97-2bd990f8ab90"
+  ]
+}
+```
+
+Validation:
+
+- Phase is `PRE_MATCH_MAIN_SECT_SELECTION`.
+- Sect exists.
+- Exactly three distinct Actions are supplied.
+- Every Action belongs to the selected Sect.
+- Active, passive, and Ultimate Actions are allowed.
+
+Before both players confirm, public event:
+
+```json
+{
+  "type": "PLAYER_CONFIRMATION_CHANGED",
+  "matchId": "8262bd3a-8ad5-41b6-baf1-5e356b0ef937",
+  "payload": {
+    "playerId": "5ab5cf4a-dc55-4130-b8e2-5b7751b091e0",
+    "kind": "MAIN_LOADOUT",
+    "confirmed": true
+  }
+}
+```
+
+The event does not reveal the selection.
+
+After both confirm, `MAIN_LOADOUT_RESOLVED` reveals both Main Sects and Main Actions and advances to `PRE_MATCH_SUPPORT_SELECTION`.
+
+Errors: `SECT_NOT_FOUND`, `ACTION_NOT_FOUND`, `ACTION_NOT_IN_SECT`, `MAIN_ACTION_COUNT_INVALID`, `DUPLICATE_ACTION`, `INVALID_MATCH_PHASE`.
+
+### 10.2 Confirm Support loadout
+
+Destination:
+
+```text
+/app/matches/{matchId}/confirm-support-loadout
+```
+
+Payload:
+
+```json
+{
+  "supportSectId": "0bdca6ea-dd91-40e9-bd81-c7fc0ba15875",
+  "supportActionId": "dc0d8d97-7a73-454f-ab90-57d16948ca15"
+}
+```
+
+Validation:
+
+- Phase is `PRE_MATCH_SUPPORT_SELECTION`.
+- Support Sect exists and may equal the Main Sect.
+- Support Action belongs to the Support Sect.
+- Support Action does not duplicate a selected Main Action.
+- Support Action has `isUltimate = false`.
+- Active or passive Support Actions are allowed.
+
+After both confirm, `SUPPORT_LOADOUT_RESOLVED` includes both complete five-slot loadouts:
 
 ```json
 {
   "type": "SUPPORT_LOADOUT_RESOLVED",
-  "matchId": "match-001",
-  "matchVersion": 5,
-  "serverTime": 1783770000000,
+  "matchId": "8262bd3a-8ad5-41b6-baf1-5e356b0ef937",
   "payload": {
     "phase": "RENEWAL",
     "roundNumber": 1,
     "players": [
       {
-        "playerId": "user-001",
-        "mainOrderId": "heaven-sword-order",
-        "supportOrderId": "dragon-sword-order",
-        "supportTechniqueId": "dragon-step",
-        "availableActionIds": ["basic-strike", "basic-guard", "quick-slash", "heaven-guard", "sky-piercer", "dragon-step"],
-        "state": { "str": 8, "hp": 120, "def": 4, "as": 5, "mp": 30, "qp": 0 }
+        "playerId": "5ab5cf4a-dc55-4130-b8e2-5b7751b091e0",
+        "mainSectId": "fdb55783-b0d7-4f74-9ac6-6fb587783ac8",
+        "supportSectId": "0bdca6ea-dd91-40e9-bd81-c7fc0ba15875",
+        "actionSlots": [
+          {
+            "actionSlotId": "863cda43-a4bf-4fd9-858a-715cc46fe982",
+            "slotType": "BASIC",
+            "actionId": "737cb9aa-f0c8-4180-a9c8-a94fe9e0de7d",
+            "activationType": "ACTIVE",
+            "isUltimate": false,
+            "currentLevel": 1
+          },
+          {
+            "actionSlotId": "18a9a33b-ff9a-4519-8fbc-04f70c522c79",
+            "slotType": "MAIN_1",
+            "actionId": "22172357-3371-4aa7-8641-d44b9405db98",
+            "activationType": "ACTIVE",
+            "isUltimate": false,
+            "currentLevel": 0
+          },
+          {
+            "actionSlotId": "3e6bb0ea-bda5-4559-b8fc-559feeaedf28",
+            "slotType": "MAIN_2",
+            "actionId": "0c949f1c-5731-45f8-a7ec-e6a2618dd80e",
+            "activationType": "PASSIVE",
+            "isUltimate": false,
+            "currentLevel": 0
+          },
+          {
+            "actionSlotId": "a6e8d004-a1cb-480e-87cb-8947e2a3ac33",
+            "slotType": "MAIN_3",
+            "actionId": "74fd7785-e24b-4de5-8f97-2bd990f8ab90",
+            "activationType": "ACTIVE",
+            "isUltimate": true,
+            "currentLevel": 0
+          },
+          {
+            "actionSlotId": "310fe49f-b93b-4684-a1fe-f28588865757",
+            "slotType": "SUPPORT",
+            "actionId": "dc0d8d97-7a73-454f-ab90-57d16948ca15",
+            "activationType": "PASSIVE",
+            "isUltimate": false,
+            "currentLevel": 0
+          }
+        ],
+        "state": {
+          "str": 10,
+          "def": 5,
+          "as": 5,
+          "hp": { "current": 110, "max": 110 },
+          "mp": { "current": 35, "max": 35 },
+          "qp": { "current": 0, "max": 10 }
+        }
       }
     ]
   }
 }
 ```
 
-## Round-phase commands and events
+Errors: `SUPPORT_ACTION_INVALID`, `SUPPORT_ACTION_DUPLICATES_MAIN`, `ULTIMATE_NOT_ALLOWED_AS_SUPPORT`.
 
-Every phase event contains `phase`, `roundNumber`, `phaseStartedAt`, `phaseDeadlineAt`, `serverTime`, and `matchVersion`. Deadlines are server-owned; clients can display a countdown but cannot advance the phase.
+---
+
+## 11. Round Phases
 
 ```mermaid
 stateDiagram-v2
-  [*] --> PRE_MATCH_MAIN_ORDER_SELECTION: match created
-  PRE_MATCH_MAIN_ORDER_SELECTION --> PRE_MATCH_SUPPORT_SELECTION: both Main Orders confirmed/revealed
-  PRE_MATCH_SUPPORT_SELECTION --> RENEWAL: both support loadouts confirmed/revealed
-  RENEWAL --> ASCENSION: server resolves effects and MP/QP
-  ASCENSION --> ACTION_STRATEGY: both LP allocations confirmed
-  ACTION_STRATEGY --> BATTLE: both Action Queues confirmed
-  BATTLE --> RENEWAL: queue exhausted; no match-end condition
-  BATTLE --> GAME_OVER: zero HP, surrender, or 5-minute disconnect
+  [*] --> PRE_MATCH_MAIN_SECT_SELECTION
+  PRE_MATCH_MAIN_SECT_SELECTION --> PRE_MATCH_SUPPORT_SELECTION
+  PRE_MATCH_SUPPORT_SELECTION --> RENEWAL
+  RENEWAL --> ASCENSION
+  ASCENSION --> ACTION_STRATEGY
+  ACTION_STRATEGY --> BATTLE
+  BATTLE --> RENEWAL
+  BATTLE --> GAME_OVER
   GAME_OVER --> [*]
 ```
 
-### Renewal
-
-Renewal has no client command. The server resolves all active effects, converts remaining MP to QP using each player’s Order ratio, fully restores MP, and publishes the authoritative result.
-
-| Event | Destination | Payload |
-| --- | --- | --- |
-| `RENEWAL_STARTED` | `/topic/matches/{matchId}` | Phase metadata and public state before Renewal |
-| `RENEWAL_RESOLVED` | `/topic/matches/{matchId}` | Resolved public effects, MP/QP and complete public state |
-| `ASCENSION_STARTED` | `/topic/matches/{matchId}` | Phase metadata and `learningPoints: 2` |
-
-### Ascension
-
-Each player receives exactly 2 LP each round. An allocation can upgrade `STR`, `HP`, `DEF`, `AS`, `MP`, or `QP`; learn an eligible Technique; or level an owned Technique. Exact costs, eligibility, and stat gains are server rules. The player may edit the allocation locally, but the server receives it only once, in the confirmation command.
+Every phase event contains:
 
 ```json
-// CONFIRM_ASCENSION payload
+{
+  "phase": "ASCENSION",
+  "roundNumber": 2,
+  "phaseStartedAt": 1783770000000,
+  "phaseDeadlineAt": 1783770030000
+}
+```
+
+### 11.1 Renewal events
+
+`RENEWAL_STARTED` contains state before Renewal.
+
+`RENEWAL_RESOLVED` contains:
+
+```json
+{
+  "type": "RENEWAL_RESOLVED",
+  "matchId": "8262bd3a-8ad5-41b6-baf1-5e356b0ef937",
+  "payload": {
+    "roundNumber": 2,
+    "resolvedEffects": [
+      {
+        "effectKey": "BLEED",
+        "sourcePlayerId": "37f622bf-7200-4cdc-b8bf-918737abe778",
+        "targetPlayerId": "5ab5cf4a-dc55-4130-b8e2-5b7751b091e0",
+        "changes": [
+          {
+            "attribute": "HP",
+            "before": 94,
+            "change": -2,
+            "after": 92
+          }
+        ]
+      }
+    ],
+    "players": []
+  }
+}
+```
+
+The server then emits `ASCENSION_STARTED` with `learningPoints: 2`.
+
+### 11.2 Confirm Ascension
+
+Destination:
+
+```text
+/app/matches/{matchId}/confirm-ascension
+```
+
+Payload:
+
+```json
 {
   "allocations": [
-    { "target": "STAT", "stat": "STR", "learningPoints": 1 },
-    { "target": "TECHNIQUE_LEVEL", "techniqueId": "quick-slash", "learningPoints": 1 }
+    {
+      "targetType": "STAT",
+      "stat": "STR",
+      "learningPoints": 1
+    },
+    {
+      "targetType": "ACTION_LEVEL",
+      "actionSlotId": "18a9a33b-ff9a-4519-8fbc-04f70c522c79",
+      "learningPoints": 1
+    }
   ]
 }
 ```
 
-| Command | Payload and validation | Valid result | Invalid result |
-| --- | --- | --- | --- |
-| `CONFIRM_ASCENSION` | `allocations`; `ASCENSION`; exactly 2 LP; valid stat/Technique target; expected MV; caller is a player | Public `PLAYER_CONFIRMATION_CHANGED` with `kind: "ASCENSION"`; after both confirmations, `ASCENSION_RESOLVED`, then `ACTION_STRATEGY_STARTED` | Private `COMMAND_REJECTED` |
+Rules:
 
-`PLAYER_CONFIRMATION_CHANGED` may announce only `{ playerId, kind: "ASCENSION", confirmed: true }`. It must not include either allocation. `ASCENSION_RESOLVED` applies both allocations atomically, exposes official stats and learned/levelled Techniques, and advances the public version.
+- Total allocation is between 0 and 2 LP.
+- Level `0 -> 1` learns the Action.
+- Level `1+` upgrades the Action.
+- Unspent LP is forfeited.
+- The allocation is submitted once and cannot be edited after confirmation.
 
-**Timeout behavior.** At `phaseDeadlineAt`, the server locks the phase using whatever `CONFIRM_ASCENSION` state it has received — same rule as Action Strategy timeout, no auto-fill. A player who never confirmed is locked in with an empty allocation (0 LP spent, no Stat/Technique change that round). A player who confirmed a partial allocation (fewer than 2 LP spent) is locked in with only what was received; unspent LP is forfeited, not carried to the next round. `ASCENSION_RESOLVED` proceeds regardless, applying whatever each player locked in.
+At timeout, an unconfirmed player receives an empty allocation. After both confirmations or timeout, `ASCENSION_RESOLVED` publishes updated Action levels and player state.
 
-### Action Strategy
+Errors: `LEARNING_POINTS_EXCEEDED`, `INVALID_ASCENSION_TARGET`, `ACTION_LEVEL_MAX`, `ALREADY_CONFIRMED`.
 
-The player configures an ordered queue locally, then sends the complete queue in one confirmation command. An `actionId` may be a Basic Action ID or an Action derived from an owned/available Technique. The server validates availability, resource rules that are known at planning time, required length, and the previous-queue retention rule. The confirmed Action Queue remains hidden until individual Actions are revealed in Battle.
+### 11.3 Confirm Action Queue
 
-```json
-// CONFIRM_ACTION_QUEUE payload for round 2
-{ "actionIds": ["basic-strike", "quick-slash", "heaven-guard"] }
+Destination:
+
+```text
+/app/matches/{matchId}/confirm-action-queue
 ```
 
-| Command | Payload and validation | Valid result | Invalid result |
-| --- | --- | --- | --- |
-| `CONFIRM_ACTION_QUEUE` | `actionIds`; `ACTION_STRATEGY`; exact required size; available Actions only (an `actionId` may repeat); at most one old occurrence removed; retained order preserved; expected MV | Public `PLAYER_CONFIRMATION_CHANGED` with `kind: "ACTION_QUEUE"`; after both confirmations, `BATTLE_STARTED` | Private `COMMAND_REJECTED` |
+Payload:
 
-An `actionId` may appear more than once in the queue (e.g., queuing Quick Slash twice in one round). The server still validates, at Battle resolution time, that the player has sufficient MP/QP for each planned use — insufficient resource on a repeat use resolves as a failed Action per the Battle execution order rule, not a rejected queue.
+```json
+{
+  "actionSlotIds": [
+    "863cda43-a4bf-4fd9-858a-715cc46fe982",
+    "18a9a33b-ff9a-4519-8fbc-04f70c522c79",
+    "863cda43-a4bf-4fd9-858a-715cc46fe982"
+  ]
+}
+```
 
-**Timeout behavior.** At `phaseDeadlineAt`, the server locks the phase using whatever `CONFIRM_ACTION_QUEUE` state it has received — it does not auto-fill missing slots with Basic Actions and does not copy the previous round's queue. A player who never confirmed is locked in with an empty queue; a player who confirmed with too few Actions is locked in with only what was received. `BATTLE_STARTED` proceeds regardless: missing slots are treated as empty positions and, per the Battle execution order rule, contribute no Action for that side at that tick.
+Rules:
 
-### Battle and match completion
+- The list length may be between 0 and the required queue size.
+- Every supplied slot belongs to the caller.
+- Every supplied Action is unlocked and active.
+- The same slot may appear multiple times.
+- Previous-queue removal and retained-order rules are enforced.
+- Submitting confirms the queue and prevents further edits.
+- Missing positions become explicit `EMPTY_TIMEOUT` entries when the phase resolves.
 
-When both queues are confirmed, the server builds a hidden tick plan pairing both queues position by position. It never sends the full plan, future ordering, or unrevealed actions. It reveals one tick (both players' Actions at that position), resolves it, checks terminal conditions, then proceeds.
+After both confirmations or timeout, `BATTLE_STARTED` is emitted. The opponent's complete queue remains hidden.
 
-| Event | Destination | Payload |
-| --- | --- | --- |
-| `BATTLE_STARTED` | `/topic/matches/{matchId}` | Phase metadata, round, public states; no queues |
-| `TICK_REVEALED` | `/topic/matches/{matchId}` | Both players' Action at this tick index, `revealedAt`, `resolveAt` |
-| `TICK_RESOLVED` | `/topic/matches/{matchId}` | Authoritative outcome for both players at this tick: each side's status, effects applied, resulting state |
-| `ROUND_ENDED` | `/topic/matches/{matchId}` | Completed round and next-round public state |
-| `PLAYER_CONNECTION_CHANGED` | `/topic/matches/{matchId}` | Player ID and connection state; never token/session data |
-| `MATCH_ENDED` | `/topic/matches/{matchId}` | Result reason, winner/loser, final public states |
+Errors: `ACTION_QUEUE_TOO_LARGE`, `ACTION_NOT_OWNED`, `ACTION_LOCKED`, `ACTION_NOT_QUEUEABLE`, `ACTION_REMOVAL_LIMIT_REACHED`, `ACTION_ORDER_INVALID`, `ALREADY_CONFIRMED`.
+
+---
+
+## 12. Battle Events
+
+### 12.1 Tick revealed
 
 ```json
 {
   "type": "TICK_REVEALED",
-  "matchId": "match-001",
-  "matchVersion": 30,
-  "serverTime": 1783770000000,
+  "matchId": "8262bd3a-8ad5-41b6-baf1-5e356b0ef937",
   "payload": {
+    "roundNumber": 2,
     "tickIndex": 0,
     "actions": [
-      { "playerId": "user-001", "actionId": "quick-slash" },
-      { "playerId": "user-002", "actionId": "iron-counter" }
+      {
+        "playerId": "5ab5cf4a-dc55-4130-b8e2-5b7751b091e0",
+        "actionSlotId": "18a9a33b-ff9a-4519-8fbc-04f70c522c79",
+        "actionId": "22172357-3371-4aa7-8641-d44b9405db98"
+      },
+      {
+        "playerId": "37f622bf-7200-4cdc-b8bf-918737abe778",
+        "actionSlotId": null,
+        "actionId": null
+      }
     ],
     "revealedAt": 1783770000000,
     "resolveAt": 1783770001500
@@ -491,249 +1131,339 @@ When both queues are confirmed, the server builds a hidden tick plan pairing bot
 }
 ```
 
+### 12.2 Tick resolved
+
 ```json
 {
   "type": "TICK_RESOLVED",
-  "matchId": "match-001",
-  "matchVersion": 31,
-  "serverTime": 1783770001500,
+  "matchId": "8262bd3a-8ad5-41b6-baf1-5e356b0ef937",
   "payload": {
+    "roundNumber": 2,
     "tickIndex": 0,
     "outcomes": [
       {
-        "playerId": "user-001",
-        "actionId": "quick-slash",
+        "playerId": "5ab5cf4a-dc55-4130-b8e2-5b7751b091e0",
+        "actionId": "22172357-3371-4aa7-8641-d44b9405db98",
         "status": "SUCCESS",
-        "effects": [{ "type": "DAMAGE", "value": 18, "appliedTo": "user-002" }]
+        "failureReason": null,
+        "effects": [
+          {
+            "effectKey": "QUICK_SLASH_DAMAGE",
+            "sourcePlayerId": "5ab5cf4a-dc55-4130-b8e2-5b7751b091e0",
+            "targetPlayerId": "37f622bf-7200-4cdc-b8bf-918737abe778",
+            "changes": [
+              {
+                "attribute": "HP",
+                "before": 100,
+                "change": -18,
+                "after": 82
+              }
+            ]
+          }
+        ]
       },
       {
-        "playerId": "user-002",
-        "actionId": "iron-counter",
-        "status": "SUCCESS",
+        "playerId": "37f622bf-7200-4cdc-b8bf-918737abe778",
+        "actionId": null,
+        "status": "FAILED",
+        "failureReason": "EMPTY_SLOT",
         "effects": []
       }
     ],
-    "sourceStateAfter": { "str": 8, "hp": 120, "def": 4, "as": 5, "mp": 22, "qp": 0 },
-    "targetStateAfter": { "str": 7, "hp": 102, "def": 3, "as": 6, "mp": 30, "qp": 0 },
+    "passiveTriggers": [
+      {
+        "ownerPlayerId": "5ab5cf4a-dc55-4130-b8e2-5b7751b091e0",
+        "actionId": "0c949f1c-5731-45f8-a7ec-e6a2618dd80e",
+        "actionKey": "SWORD_INSTINCT",
+        "triggerEvent": "ACTION_HIT",
+        "effects": []
+      }
+    ],
+    "players": [],
     "matchResult": null
   }
 }
 ```
 
-If a player's Action at a tick fails (insufficient resource, disabled by an effect, or an empty slot from a timeout), that player's entry has `"status": "FAILED"`, a `failureReason` of `INSUFFICIENT_RESOURCE`, `DISABLED_BY_EFFECT`, or `EMPTY_SLOT`, and `"effects": []`; the opponent's entry still resolves normally.
+`failureReason` values:
 
-When a tick causes the match to end, `matchResult` is populated instead of `null`:
-
-```json
-// TICK_RESOLVED payload when both players' HP reach zero on the same tick
-"matchResult": { "reason": "DRAW", "winnerPlayerId": null, "loserPlayerId": null }
+```text
+INSUFFICIENT_RESOURCE
+DISABLED_BY_EFFECT
+EMPTY_SLOT
 ```
 
-```json
-// TICK_RESOLVED payload for a normal, non-drawn match end
-"matchResult": { "reason": "HP_REACHED_ZERO", "winnerPlayerId": "user-001", "loserPlayerId": "user-002" }
+The server limits passive trigger depth and events per tick. A passive-trigger loop is rejected internally and reported using `INTERNAL_GAMEPLAY_ERROR`; partial client-calculated recovery is never allowed.
+
+### 12.3 Round and match completion
+
+If no terminal condition exists after all ticks, the server emits `ROUND_ENDED` and starts the next Renewal.
+
+Match result reasons:
+
+```text
+HP_REACHED_ZERO
+SURRENDER
+DISCONNECTED
+DRAW
 ```
 
-**Disconnect handling applies to the whole match lifecycle**, not just Battle: from `MATCH_CREATED` through `GAME_OVER`, any STOMP disconnect for a match player immediately starts a 5-minute countdown, regardless of the current phase (`PRE_MATCH_MAIN_ORDER_SELECTION`, `PRE_MATCH_SUPPORT_SELECTION`, `RENEWAL`, `ASCENSION`, `ACTION_STRATEGY`, or `BATTLE`). The server publishes `PLAYER_CONNECTION_CHANGED` with `connected: false` and records the server time. If the player reconnects and authenticates as the same Principal within five minutes, the server publishes `connected: true` and the client requests snapshots. If five minutes elapse while still disconnected, the server ends the match with `DISCONNECTED` — the disconnected player loses — cancels any pending phase timers or tick resolutions, and emits `MATCH_ENDED`.
-
-### Surrender
-
-`SURRENDER` is valid from either match player in any phase except `GAME_OVER` — including pre-match selection, `RENEWAL`, `ASCENSION`, and `ACTION_STRATEGY`, not just `BATTLE`.
-
-| Command | Destination | Payload | Validation | Result |
-| --- | --- | --- | --- | --- |
-| `SURRENDER` | `/app/matches/{matchId}/surrender` | `{}` | Caller is a match player; current phase is not `GAME_OVER`; expected MV | Immediately ends the match: public `MATCH_ENDED` with `reason: "SURRENDER"`, opponent as winner |
-
-Surrendering cancels any in-flight phase timers, pending Battle ticks, and outstanding confirmations for both players.
-
-## Error codes
-
-| Code | Meaning |
-| --- | --- |
-| `UNAUTHORIZED`, `TOKEN_EXPIRED`, `INVALID_TOKEN` | Authentication is absent, expired, or invalid |
-| `ROOM_NOT_FOUND`, `ROOM_FULL`, `ROOM_ALREADY_STARTED` | Room cannot be joined or used |
-| `PLAYER_NOT_IN_ROOM`, `NOT_ROOM_HOST`, `PLAYERS_NOT_READY`, `PLAYER_DISCONNECTED` | Caller lacks room authority, start requirements fail, or a room member is not currently connected |
-| `MATCH_NOT_FOUND`, `PLAYER_NOT_IN_MATCH`, `MATCH_NOT_FINISHED` | Match resource or membership is invalid |
-| `INVALID_MATCH_PHASE` | Command cannot run in current phase |
-| `STALE_ROOM_VERSION`, `STALE_MATCH_VERSION` | Caller must request/reconcile a snapshot |
-| `ORDER_NOT_FOUND`, `TECHNIQUE_NOT_FOUND`, `SUPPORT_TECHNIQUE_INVALID` | Selection does not identify a valid Order/Technique relationship |
-| `LEARNING_POINTS_EXCEEDED`, `INVALID_ASCENSION_TARGET` | LP allocation is invalid |
-| `ACTION_COUNT_INVALID`, `ACTION_NOT_AVAILABLE`, `ACTION_REMOVAL_LIMIT_REACHED`, `ACTION_ORDER_INVALID` | Action Queue violates the round or ownership rules |
-| `COMMAND_ALREADY_PROCESSED` | Duplicate `commandId`; server returns the original outcome when retained |
-| `VALIDATION_ERROR`, `INTERNAL_SERVER_ERROR` | Invalid shape/field or unexpected server error |
-
-STOMP rejections are private and retain the correlation ID:
+When both players reach zero HP during the same tick:
 
 ```json
 {
-  "type": "COMMAND_REJECTED",
-  "matchId": "match-001",
-  "matchVersion": 18,
-  "correlationId": "92e72a9b-6e7d-4be5-bc87-37fc7aa5f2aa",
-  "serverTime": 1783770000000,
+  "reason": "DRAW",
+  "winnerPlayerId": null,
+  "loserPlayerId": null
+}
+```
+
+---
+
+## 13. Connection and Surrender
+
+### 13.1 Connection changes
+
+`PLAYER_CONNECTION_CHANGED`:
+
+```json
+{
+  "type": "PLAYER_CONNECTION_CHANGED",
+  "matchId": "8262bd3a-8ad5-41b6-baf1-5e356b0ef937",
   "payload": {
-    "code": "ACTION_COUNT_INVALID",
-    "message": "Round 2 requires exactly three Actions."
+    "playerId": "37f622bf-7200-4cdc-b8bf-918737abe778",
+    "connected": false,
+    "disconnectedAt": 1783770000000,
+    "disconnectDeadlineAt": 1783770300000
   }
 }
 ```
 
-## TypeScript and Java DTO examples
+A disconnected match player has five minutes to reconnect in any phase. Reconnection must use an active session belonging to the same user. If the deadline expires, the server ends the match with `DISCONNECTED`.
+
+### 13.2 Surrender
+
+Destination:
+
+```text
+/app/matches/{matchId}/surrender
+```
+
+Payload:
+
+```json
+{}
+```
+
+Surrender is valid in every match phase except `GAME_OVER`. It immediately creates the match result, cancels pending timers, and emits `MATCH_ENDED`.
+
+---
+
+## 14. Error Codes
+
+| Code | Meaning |
+|---|---|
+| `UNAUTHORIZED` | Authentication is missing or invalid. |
+| `TOKEN_EXPIRED` | Access or refresh token has expired. |
+| `INVALID_TOKEN` | Token signature or value is invalid. |
+| `SESSION_REVOKED` | Server-side session is no longer active. |
+| `TOKEN_REUSE_DETECTED` | A rotated refresh token was reused. |
+| `VALIDATION_ERROR` | Request shape or field value is invalid. |
+| `ROOM_NOT_FOUND` | Room does not exist. |
+| `ROOM_FULL` | Both room slots are occupied. |
+| `ROOM_ALREADY_STARTED` | Room can no longer be changed or joined. |
+| `PLAYER_NOT_IN_ROOM` | Caller is not a room member. |
+| `NOT_ROOM_HOST` | Caller is not Player A. |
+| `PLAYERS_NOT_READY` | Match start requirements are not satisfied. |
+| `PLAYER_DISCONNECTED` | Both players must be connected to start. |
+| `MATCH_NOT_FOUND` | Match does not exist. |
+| `PLAYER_NOT_IN_MATCH` | Caller is not a match player. |
+| `INVALID_MATCH_PHASE` | Command is not valid in the current phase. |
+| `SECT_NOT_FOUND` | Sect does not exist. |
+| `ACTION_NOT_FOUND` | Action does not exist. |
+| `ACTION_NOT_IN_SECT` | Action does not belong to the selected Sect. |
+| `MAIN_ACTION_COUNT_INVALID` | Main loadout does not contain exactly three Actions. |
+| `DUPLICATE_ACTION` | A loadout contains the same Action more than once. |
+| `SUPPORT_ACTION_INVALID` | Support Action is not eligible. |
+| `SUPPORT_ACTION_DUPLICATES_MAIN` | Support Action duplicates a selected Main Action. |
+| `ULTIMATE_NOT_ALLOWED_AS_SUPPORT` | Ultimate Actions cannot be selected as Support. |
+| `LEARNING_POINTS_EXCEEDED` | Ascension allocation exceeds 2 LP. |
+| `INVALID_ASCENSION_TARGET` | Ascension target is invalid or ineligible. |
+| `ACTION_LEVEL_MAX` | Action cannot be upgraded further. |
+| `ACTION_QUEUE_TOO_LARGE` | Queue exceeds the required size. |
+| `ACTION_NOT_OWNED` | Action slot does not belong to the caller. |
+| `ACTION_LOCKED` | Action has level 0. |
+| `ACTION_NOT_QUEUEABLE` | Passive Action was submitted to the queue. |
+| `ACTION_REMOVAL_LIMIT_REACHED` | More than one retained occurrence was removed. |
+| `ACTION_ORDER_INVALID` | Relative order of retained entries changed. |
+| `ALREADY_CONFIRMED` | Player already confirmed the phase. |
+| `MATCH_NOT_FINISHED` | Match result is not available. |
+| `INTERNAL_GAMEPLAY_ERROR` | Authoritative engine could not safely resolve gameplay. |
+
+Private STOMP rejection:
+
+```json
+{
+  "type": "COMMAND_REJECTED",
+  "matchId": "8262bd3a-8ad5-41b6-baf1-5e356b0ef937",
+  "correlationId": "77e99328-7e61-4e84-aa93-73f9a8379451",
+  "payload": {
+    "code": "ACTION_NOT_QUEUEABLE",
+    "message": "Passive Actions cannot be added to the Action Queue.",
+    "details": {
+      "actionSlotId": "18a9a33b-ff9a-4519-8fbc-04f70c522c79"
+    }
+  }
+}
+```
+
+---
+
+## 15. TypeScript DTO Reference
 
 ```ts
-export type MatchPhase =
-  | 'PRE_MATCH_MAIN_ORDER_SELECTION' | 'PRE_MATCH_SUPPORT_SELECTION'
-  | 'RENEWAL' | 'ASCENSION' | 'ACTION_STRATEGY' | 'BATTLE' | 'GAME_OVER';
+export type ActionSource = 'BASIC' | 'SECT';
+export type ActivationType = 'ACTIVE' | 'PASSIVE';
+export type ActionSlotType = 'BASIC' | 'MAIN_1' | 'MAIN_2' | 'MAIN_3' | 'SUPPORT';
 
-export interface ClientCommand<TPayload = Record<string, never>> {
+export type MatchPhase =
+  | 'PRE_MATCH_MAIN_SECT_SELECTION'
+  | 'PRE_MATCH_SUPPORT_SELECTION'
+  | 'RENEWAL'
+  | 'ASCENSION'
+  | 'ACTION_STRATEGY'
+  | 'BATTLE'
+  | 'GAME_OVER';
+
+export interface CappedValue {
+  current: number;
+  max: number;
+}
+
+export interface PlayerState {
+  str: number;
+  def: number;
+  as: number;
+  hp: CappedValue;
+  mp: CappedValue;
+  qp: CappedValue;
+}
+
+export interface ActionSummary {
+  actionId: string;
+  actionKey: string;
+  name: string;
+  description: string | null;
+  actionSource: ActionSource;
+  activationType: ActivationType;
+  isUltimate: boolean;
+  maxLevel: number;
+}
+
+export interface MatchActionSlot {
+  actionSlotId: string;
+  slotType: ActionSlotType;
+  actionId: string;
+  activationType: ActivationType;
+  isUltimate: boolean;
+  currentLevel: number;
+}
+
+export interface ConfirmMainLoadoutPayload {
+  mainSectId: string;
+  mainActionIds: [string, string, string];
+}
+
+export interface ConfirmSupportLoadoutPayload {
+  supportSectId: string;
+  supportActionId: string;
+}
+
+export interface ConfirmActionQueuePayload {
+  actionSlotIds: string[];
+}
+
+export interface ClientCommand<TPayload> {
   commandId: string;
   type: string;
-  roomId?: string;
-  matchId?: string;
-  expectedRoomVersion?: number;
-  expectedMatchVersion?: number;
   clientTime: number;
   payload: TPayload;
 }
 
-export interface ServerEvent<TPayload = unknown> {
+export interface ServerEvent<TPayload> {
   eventId: string;
   type: string;
   roomId?: string;
   matchId?: string;
-  roomVersion?: number;
-  matchVersion?: number;
   serverTime: number;
   correlationId?: string;
   payload: TPayload;
 }
-
-export interface PlayerState {
-  str: number; hp: number; def: number; as: number; mp: number; qp: number;
-}
-
-export interface ActionQueueDraft { actionIds: string[] }
-export interface AscensionAllocation {
-  target: 'STAT' | 'LEARN_TECHNIQUE' | 'TECHNIQUE_LEVEL';
-  stat?: 'STR' | 'HP' | 'DEF' | 'AS' | 'MP' | 'QP';
-  techniqueId?: string;
-  learningPoints: number;
-}
-
-export interface TickActionOutcome {
-  playerId: string;
-  actionId: string | null;
-  status: 'SUCCESS' | 'FAILED';
-  failureReason?: 'INSUFFICIENT_RESOURCE' | 'DISABLED_BY_EFFECT' | 'EMPTY_SLOT';
-  effects: Array<{ type: string; value: number; appliedTo: string }>;
-}
 ```
 
+---
+
+## 16. Spring Boot DTO Reference
+
 ```java
+public enum ActionSource {
+    BASIC, SECT
+}
+
+public enum ActivationType {
+    ACTIVE, PASSIVE
+}
+
+public enum ActionSlotType {
+    BASIC, MAIN_1, MAIN_2, MAIN_3, SUPPORT
+}
+
+public record ConfirmMainLoadoutPayload(
+    UUID mainSectId,
+    List<UUID> mainActionIds
+) {}
+
+public record ConfirmSupportLoadoutPayload(
+    UUID supportSectId,
+    UUID supportActionId
+) {}
+
+public record ConfirmActionQueuePayload(
+    List<UUID> actionSlotIds
+) {}
+
 public record ClientCommand<T>(
-    UUID commandId, String type, String roomId, String matchId,
-    Long expectedRoomVersion, Long expectedMatchVersion,
-    long clientTime, T payload
+    UUID commandId,
+    String type,
+    long clientTime,
+    T payload
 ) {}
 
 public record ServerEvent<T>(
-    UUID eventId, String type, String roomId, String matchId,
-    Long roomVersion, Long matchVersion,
-    long serverTime, UUID correlationId, T payload
+    UUID eventId,
+    String type,
+    UUID roomId,
+    UUID matchId,
+    long serverTime,
+    UUID correlationId,
+    T payload
 ) {}
-
-public record SelectMainOrderPayload(String mainOrderId) {}
-public record SelectSupportLoadoutPayload(String supportOrderId, String supportTechniqueId) {}
-public record ActionQueueDraftPayload(List<String> actionIds) {}
-public record AscensionAllocation(String target, String stat, String techniqueId, int learningPoints) {}
-public record AscensionDraftPayload(List<AscensionAllocation> allocations) {}
-public record KickPlayerPayload(String targetPlayerId) {}
 ```
 
-Java handlers get the player identity from `Principal`, then load the room/match and validate membership server-side. Payload records contain no `playerId` by design.
+Java validation must use typed DTOs and enums. WebSocket handlers obtain the authenticated user from `Principal`; command payloads never contain a caller-controlled `playerId`.
 
-## End-to-end sequence
+---
 
-```mermaid
-sequenceDiagram
-  participant A as Player A
-  participant B as Player B
-  participant S as SwordVerse Server
+## 17. Security and Client-State Rules
 
-  A->>S: POST /api/auth/login
-  B->>S: POST /api/auth/login
-
-  A->>S: STOMP CONNECT (JWT)
-  B->>S: STOMP CONNECT (JWT)
-
-  A->>S: POST /api/rooms
-  B->>S: JOIN_ROOM {roomCode}
-  S-->>B: Private JOIN_ROOM_ACCEPTED
-  S-->>A: Public PLAYER_JOINED_ROOM
-
-  A->>S: SET_ROOM_READY
-  B->>S: SET_ROOM_READY
-
-  A->>S: START_MATCH
-  S-->>A: MATCH_CREATED
-  S-->>B: MATCH_CREATED
-
-  A->>S: Subscribe to match topic
-  A->>S: Request snapshot
-  B->>S: Subscribe to match topic
-  B->>S: Request snapshot
-
-  A->>S: CONFIRM_MAIN_ORDER {mainOrderId}
-  B->>S: CONFIRM_MAIN_ORDER {mainOrderId}
-
-  S-->>A: MAIN_ORDER_SELECTION_RESOLVED
-  S-->>B: MAIN_ORDER_SELECTION_RESOLVED
-
-  A->>S: CONFIRM_SUPPORT_LOADOUT {order, technique}
-  B->>S: CONFIRM_SUPPORT_LOADOUT {order, technique}
-
-  S-->>A: SUPPORT_LOADOUT_REVEALED
-  S-->>B: SUPPORT_LOADOUT_REVEALED
-  S-->>A: RENEWAL_STARTED
-  S-->>B: RENEWAL_STARTED
-  S-->>A: ASCENSION_STARTED
-  S-->>B: ASCENSION_STARTED
-
-  A->>S: CONFIRM_ASCENSION {allocations}
-  B->>S: CONFIRM_ASCENSION {allocations}
-
-  S-->>A: ASCENSION_RESOLVED
-  S-->>B: ASCENSION_RESOLVED
-  S-->>A: ACTION_STRATEGY_STARTED
-  S-->>B: ACTION_STRATEGY_STARTED
-
-  A->>S: CONFIRM_ACTION_QUEUE {actionIds}
-  B->>S: CONFIRM_ACTION_QUEUE {actionIds}
-
-  S-->>A: BATTLE_STARTED
-  S-->>B: BATTLE_STARTED
-  S-->>A: TICK_REVEALED
-  S-->>B: TICK_REVEALED
-  S-->>A: TICK_RESOLVED
-  S-->>B: TICK_RESOLVED
-
-  alt Queue exhausted and no winner
-    S-->>A: ROUND_ENDED
-    S-->>B: ROUND_ENDED
-    S-->>A: Next RENEWAL
-    S-->>B: Next RENEWAL
-  else HP reaches zero (or both reach zero), surrender, or five-minute disconnect
-    S-->>A: MATCH_ENDED
-    S-->>B: MATCH_ENDED
-  end
-```
-
-## Security and client-state rules
-
-* Derive player identity solely from JWT and `Principal`; never trust client-supplied player identity.
-* Authorize every REST read, STOMP command, snapshot request, and room/match subscription against membership. Require host authority to start a room or kick a player.
-* Validate the public version, current phase, and command idempotency before state mutation.
-* Use `commandId` as an idempotency key. A retry must not spend LP twice, confirm twice, change readiness twice, or create a second match.
-* Never publish a confirmed-but-unrevealed Main Order, Support loadout, Ascension allocation, or Action Queue to a public topic. Publish only a player confirmation flag until the phase resolves.
-* Never send the complete future tick plan; expose a tick's Actions only through `TICK_REVEALED`, never upcoming ticks.
-* Redux reducers consume authoritative public events/snapshots; `/user/queue/errors` is used only for the signed-in player's rejected commands. RTK Query owns REST data and reload-safe snapshots. Client animation timing is presentation only.
+- Derive identity exclusively from JWT, active server session, and Spring `Principal`.
+- Authorize every room and match read, subscription, and command against membership.
+- Do not reveal secret Main selections, Support selections, Ascension allocations, or queues before their reveal point.
+- Do not expose `behavior_handler`, Effect component config, formulas, or server-only trigger filters.
+- Treat every client stat, cost, target, damage, Effect, and result value as untrusted.
+- Validate Action ownership, current level, activation type, Sect membership, Support duplication, and Ultimate restrictions server-side.
+- Process each gameplay command transactionally.
+- On reconnect, subscribe before requesting a snapshot.
+- Do not replay confirmation commands automatically after reconnect.
+- Do not persist or expose a complete Battle replay. The frontend may render a lightweight Battle Log from live `TICK_RESOLVED` events.
+- Static Action and Effect definitions are immutable while matches are active. End or cancel active matches before applying static game-data changes.
