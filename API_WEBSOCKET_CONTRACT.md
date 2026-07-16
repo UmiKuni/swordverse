@@ -45,7 +45,7 @@ Each round has the four README phases:
 1. `RENEWAL`: server resolves active effects, converts remaining MP to QP at the Order-defined ratio, then fully restores MP.
 2. `ASCENSION`: each player builds a local 2 Learning Point (LP) allocation, then submits it once as a confirmation. Both allocations resolve simultaneously.
 3. `ACTION_STRATEGY`: each player builds a local Action Queue, then submits it once as a confirmation.
-4. `BATTLE`: the server reveals and resolves Actions one at a time and emits the Battle Log.
+4. `BATTLE`: the server reveals and resolves both players' Actions together, tick by tick, and emits the Battle Log.
 
 Action Queue length by round:
 
@@ -60,13 +60,15 @@ Action Queue length by round:
 
 After round 1, a plan may remove at most one occurrence from the previous queue. The retained occurrences must keep their relative order; newly available Actions can be inserted at the beginning, end, or between retained occurrences.
 
-The match ends immediately when HP reaches zero, a player surrenders, or a player has stayed disconnected for more than five minutes. Result reasons are `HP_REACHED_ZERO`, `SURRENDER`, and `DISCONNECTED`.
+The match ends immediately when HP reaches zero, a player surrenders, or a player has stayed disconnected for more than five minutes. Result reasons are `HP_REACHED_ZERO`, `SURRENDER`, `DISCONNECTED`, and `DRAW`. `DRAW` applies when both players' HP reach zero within the same tick — with simultaneous resolution, this is possible and neither side is treated as the winner.
 
 ### Battle execution order
 
-Within a Round, Actions execute in strict ping-pong order: the initiative player's next queued Action, then the opponent's next queued Action, alternating until both queues are exhausted. Initiative alternates by round — Player A leads round 1, Player B leads round 2, and so on.
+Within a Round, both players' Action Queues execute in lockstep by position: the Action at index 0 of Player A's queue and index 0 of Player B's queue resolve together as one **tick**; then index 1; and so on, until both queues are exhausted. There is no turn alternation and no initiative — every tick involves both players simultaneously. An empty slot (from a timeout-locked queue) counts as "no Action" for that side that tick.
 
-If, when an Action's turn arrives, its owner lacks the required MP/QP or is disabled by an active effect, the server immediately marks that Action as failed and reveals it with `status: "FAILED"`. A failed Action consumes no resource, applies no effect, and execution proceeds immediately to the opponent's next Action.
+The outcome of a tick depends on the combination of both Actions, not either one in isolation — for example, two attacking Actions each damage the other player; an attack against a counter damages only the attacker; an attack against a guard damages neither player. These are only illustrative cases: Techniques cover a much wider range of effects (healing, resource restoration, Defense-ignoring damage, and other special interactions), and the server resolves the actual outcome of any pair of simultaneous Actions using each Action's configured effects — this is game-engine logic, not a fixed lookup of combat roles.
+
+If a player's queued Action at a tick can't be afforded (insufficient MP/QP) or is disabled by an active effect, only that player's Action fails for the tick — it contributes no effect, while the opponent's Action (if any) still resolves normally against them.
 
 ## Authentication and transport
 
@@ -150,7 +152,8 @@ The client uses these read-only endpoints to show selections and tooltips. Stati
   "description": "A swift sword attack.",
   "cost": { "resource": "MP", "amount": 8 },
   "maxLevel": 3,
-  "sourceOrderIds": ["heaven-sword-order"]
+  "sourceOrderIds": ["heaven-sword-order"],
+  "levelUpCost": [1, 2, 3]
 }
 ```
 
@@ -161,6 +164,8 @@ The client uses these read-only endpoints to show selections and tooltips. Stati
   { "actionId": "basic-guard", "name": "Basic Guard", "description": "A defensive stance." }
 ]
 ```
+
+`levelUpCost` is the Learning Point cost to learn/level this Technique, indexed by target level (index 0 = cost to learn level 1). Orders and stats also expose LP cost data for Ascension: an Order's stat bonuses and the global `statUpgradeCost` per stat are used by the client to render and locally validate an Ascension allocation before confirming.
 
 ### Room APIs
 
@@ -226,6 +231,8 @@ Only a match player can read these resources. The regular match response is a pu
 }
 ```
 
+When `reason` is `"DRAW"`, both `winnerPlayerId` and `loserPlayerId` are `null`.
+
 ### REST error body
 
 ```json
@@ -246,6 +253,7 @@ Only a match player can read these resources. The regular match response is a pu
 | Client → server | `/app/rooms/join` | Join a room with a room code |
 | Client → server | `/app/rooms/{roomId}/leave` | Leave an unstarted room |
 | Client → server | `/app/rooms/{roomId}/ready` | Set caller readiness |
+| Client → server | `/app/rooms/{roomId}/kick` | Host removes a player from an unstarted room |
 | Client → server | `/app/rooms/{roomId}/start` | Host starts a two-player ready room |
 | Client → server | `/app/rooms/{roomId}/request-snapshot` | Request caller's room snapshot |
 | Client → server | `/app/matches/{matchId}/confirm-main-order` | Confirm a secret Main Order |
@@ -319,8 +327,8 @@ On reconnect, subscribe first, then request the public snapshot. Do not replay a
 | --- | --- | --- | --- | --- |
 | `JOIN_ROOM` | `/app/rooms/join` | `{ "roomCode": "A7K9Q2" }` | JWT; room exists; not full; not started | Private `JOIN_ROOM_ACCEPTED`, then public update |
 | `LEAVE_ROOM` | `/app/rooms/{roomId}/leave` | `{}` | Caller is a member; room not started | Public leave or close event |
-| `KICK_PLAYER` | `/app/rooms/{roomId}/kick` | `{ "targetPlayerId": "user-002" }` | Caller is host; target is a room member and not the caller; room not started | Public `PLAYER_KICKED`, room reverts to `WAITING_FOR_PLAYER` |
 | `SET_ROOM_READY` | `/app/rooms/{roomId}/ready` | `{ "ready": true }` | Member; room open; expected RV | Public readiness/state event |
+| `KICK_PLAYER` | `/app/rooms/{roomId}/kick` | `{ "targetPlayerId": "user-002" }` | Caller is host; target is a room member and not the caller; room not started | Public `PLAYER_KICKED`, room reverts to `WAITING_FOR_PLAYER` |
 | `START_MATCH` | `/app/rooms/{roomId}/start` | `{}` | Caller is host; exactly two members; both ready; both currently connected; expected RV | Public `MATCH_CREATED` |
 | `REQUEST_ROOM_SNAPSHOT` | `/app/rooms/{roomId}/request-snapshot` | `{}` | Caller is room member | Private `ROOM_SNAPSHOT` |
 
@@ -333,8 +341,8 @@ On reconnect, subscribe first, then request the public snapshot. Do not replay a
 | `ROOM_STATE_UPDATED` | `/topic/rooms/{roomId}` | Both players | Complete room state |
 | `PLAYER_JOINED_ROOM` | `/topic/rooms/{roomId}` | Both players | Joining player and complete room state |
 | `PLAYER_LEFT_ROOM` | `/topic/rooms/{roomId}` | Remaining player | Left player ID and room state |
-| `PLAYER_KICKED` | `/topic/rooms/{roomId}` | Both players (kicked player receives it before their subscription is dropped) | Kicked player ID, reason, and updated room state |
 | `PLAYER_READY_CHANGED` | `/topic/rooms/{roomId}` | Both players | Player ID, readiness, and room state |
+| `PLAYER_KICKED` | `/topic/rooms/{roomId}` | Both players (kicked player receives it before their subscription is dropped) | Kicked player ID, reason, and updated room state |
 | `ROOM_CLOSED` | `/topic/rooms/{roomId}` | Current subscribers | Closure reason |
 | `MATCH_CREATED` | `/topic/rooms/{roomId}` | Both players | `matchId`, `matchVersion`, initial phase |
 | `COMMAND_REJECTED` | `/user/queue/room-events` | Caller | Error code/message/correlation ID |
@@ -431,9 +439,9 @@ Each player receives exactly 2 LP each round. An allocation can upgrade `STR`, `
 | --- | --- | --- | --- |
 | `CONFIRM_ASCENSION` | `allocations`; `ASCENSION`; exactly 2 LP; valid stat/Technique target; expected MV; caller is a player | Public `PLAYER_CONFIRMATION_CHANGED` with `kind: "ASCENSION"`; after both confirmations, `ASCENSION_RESOLVED`, then `ACTION_STRATEGY_STARTED` | Private `COMMAND_REJECTED` |
 
-**Timeout behavior.** At `phaseDeadlineAt`, the server locks the phase using whatever `CONFIRM_ASCENSION` state it has received — same rule as Action Strategy timeout, no auto-fill. A player who never confirmed is locked in with an empty allocation (0 LP spent, no Stat/Technique change that round). A player who confirmed a partial allocation (fewer than 2 LP spent) is locked in with only what was received; unspent LP is forfeited, not carried to the next round. `ASCENSION_RESOLVED` proceeds regardless, applying whatever each player locked in.
-
 `PLAYER_CONFIRMATION_CHANGED` may announce only `{ playerId, kind: "ASCENSION", confirmed: true }`. It must not include either allocation. `ASCENSION_RESOLVED` applies both allocations atomically, exposes official stats and learned/levelled Techniques, and advances the public version.
+
+**Timeout behavior.** At `phaseDeadlineAt`, the server locks the phase using whatever `CONFIRM_ASCENSION` state it has received — same rule as Action Strategy timeout, no auto-fill. A player who never confirmed is locked in with an empty allocation (0 LP spent, no Stat/Technique change that round). A player who confirmed a partial allocation (fewer than 2 LP spent) is locked in with only what was received; unspent LP is forfeited, not carried to the next round. `ASCENSION_RESOLVED` proceeds regardless, applying whatever each player locked in.
 
 ### Action Strategy
 
@@ -450,33 +458,33 @@ The player configures an ordered queue locally, then sends the complete queue in
 
 An `actionId` may appear more than once in the queue (e.g., queuing Quick Slash twice in one round). The server still validates, at Battle resolution time, that the player has sufficient MP/QP for each planned use — insufficient resource on a repeat use resolves as a failed Action per the Battle execution order rule, not a rejected queue.
 
-**Timeout behavior.** At `phaseDeadlineAt`, the server locks the phase using whatever `CONFIRM_ACTION_QUEUE` state it has received — it does not auto-fill missing slots with Basic Actions and does not copy the previous round's queue. A player who never confirmed is locked in with an empty queue; a player who confirmed with too few Actions is locked in with only what was received. `BATTLE_STARTED` proceeds regardless: missing slots are treated as empty positions and, per the Battle execution order rule, are skipped when their turn arrives — no Action is revealed for an empty slot, and execution passes straight to the opponent.
+**Timeout behavior.** At `phaseDeadlineAt`, the server locks the phase using whatever `CONFIRM_ACTION_QUEUE` state it has received — it does not auto-fill missing slots with Basic Actions and does not copy the previous round's queue. A player who never confirmed is locked in with an empty queue; a player who confirmed with too few Actions is locked in with only what was received. `BATTLE_STARTED` proceeds regardless: missing slots are treated as empty positions and, per the Battle execution order rule, contribute no Action for that side at that tick.
 
 ### Battle and match completion
 
-When both queues are confirmed, the server creates a hidden execution plan from both queues and official AS/rules. It never sends the full plan, future ordering, or unrevealed actions. It reveals one Action, resolves it, checks terminal conditions, then proceeds.
+When both queues are confirmed, the server builds a hidden tick plan pairing both queues position by position. It never sends the full plan, future ordering, or unrevealed actions. It reveals one tick (both players' Actions at that position), resolves it, checks terminal conditions, then proceeds.
 
 | Event | Destination | Payload |
 | --- | --- | --- |
 | `BATTLE_STARTED` | `/topic/matches/{matchId}` | Phase metadata, round, public states; no queues |
-| `ACTION_REVEALED` | `/topic/matches/{matchId}` | One current execution: source, target, action, `revealedAt`, `resolveAt` |
-| `ACTION_RESOLVED` | `/topic/matches/{matchId}` | Authoritative Battle Log entry, effects, resource/stat states after resolution |
+| `TICK_REVEALED` | `/topic/matches/{matchId}` | Both players' Action at this tick index, `revealedAt`, `resolveAt` |
+| `TICK_RESOLVED` | `/topic/matches/{matchId}` | Authoritative outcome for both players at this tick: each side's status, effects applied, resulting state |
 | `ROUND_ENDED` | `/topic/matches/{matchId}` | Completed round and next-round public state |
 | `PLAYER_CONNECTION_CHANGED` | `/topic/matches/{matchId}` | Player ID and connection state; never token/session data |
 | `MATCH_ENDED` | `/topic/matches/{matchId}` | Result reason, winner/loser, final public states |
 
 ```json
 {
-  "type": "ACTION_REVEALED",
+  "type": "TICK_REVEALED",
   "matchId": "match-001",
   "matchVersion": 30,
   "serverTime": 1783770000000,
   "payload": {
-    "executionId": "execution-001",
-    "actionIndex": 0,
-    "sourcePlayerId": "user-001",
-    "targetPlayerId": "user-002",
-    "actionId": "quick-slash",
+    "tickIndex": 0,
+    "actions": [
+      { "playerId": "user-001", "actionId": "quick-slash" },
+      { "playerId": "user-002", "actionId": "iron-counter" }
+    ],
     "revealedAt": 1783770000000,
     "resolveAt": 1783770001500
   }
@@ -485,45 +493,48 @@ When both queues are confirmed, the server creates a hidden execution plan from 
 
 ```json
 {
-  "type": "ACTION_RESOLVED",
+  "type": "TICK_RESOLVED",
   "matchId": "match-001",
   "matchVersion": 31,
   "serverTime": 1783770001500,
   "payload": {
-    "executionId": "execution-001",
-    "actionId": "quick-slash",
-    "battleLogEntry": {
-      "status": "SUCCESS",
-      "effects": [{ "type": "DAMAGE", "value": 18 }]
-    },
+    "tickIndex": 0,
+    "outcomes": [
+      {
+        "playerId": "user-001",
+        "actionId": "quick-slash",
+        "status": "SUCCESS",
+        "effects": [{ "type": "DAMAGE", "value": 18, "appliedTo": "user-002" }]
+      },
+      {
+        "playerId": "user-002",
+        "actionId": "iron-counter",
+        "status": "SUCCESS",
+        "effects": []
+      }
+    ],
     "sourceStateAfter": { "str": 8, "hp": 120, "def": 4, "as": 5, "mp": 22, "qp": 0 },
-    "targetStateAfter": { "str": 7, "hp": 0, "def": 3, "as": 6, "mp": 30, "qp": 0 },
-    "matchResult": { "reason": "HP_REACHED_ZERO", "winnerPlayerId": "user-001", "loserPlayerId": "user-002" }
+    "targetStateAfter": { "str": 7, "hp": 102, "def": 3, "as": 6, "mp": 30, "qp": 0 },
+    "matchResult": null
   }
 }
 ```
 
-`battleLogEntry.status` is `"SUCCESS"` or `"FAILED"`. On `"FAILED"`, `battleLogEntry.failureReason` is `"INSUFFICIENT_RESOURCE"` or `"DISABLED_BY_EFFECT"`, `effects` is empty, and both state snapshots are unchanged from before the Action.
+If a player's Action at a tick fails (insufficient resource, disabled by an effect, or an empty slot from a timeout), that player's entry has `"status": "FAILED"`, a `failureReason` of `INSUFFICIENT_RESOURCE`, `DISABLED_BY_EFFECT`, or `EMPTY_SLOT`, and `"effects": []`; the opponent's entry still resolves normally.
+
+When a tick causes the match to end, `matchResult` is populated instead of `null`:
 
 ```json
-{
-  "type": "ACTION_RESOLVED",
-  "matchId": "match-001",
-  "matchVersion": 32,
-  "serverTime": 1783770003000,
-  "payload": {
-    "executionId": "execution-002",
-    "actionId": "heaven-guard",
-    "battleLogEntry": { "status": "FAILED", "failureReason": "INSUFFICIENT_RESOURCE", "effects": [] },
-    "sourceStateAfter": { "str": 8, "hp": 120, "def": 4, "as": 5, "mp": 0, "qp": 0 },
-    "targetStateAfter": { "str": 7, "hp": 102, "def": 3, "as": 6, "mp": 30, "qp": 0 }
-  }
-}
+// TICK_RESOLVED payload when both players' HP reach zero on the same tick
+"matchResult": { "reason": "DRAW", "winnerPlayerId": null, "loserPlayerId": null }
 ```
 
-Disconnect handling applies to the whole match lifecycle, not just Battle: from `MATCH_CREATED` through `GAME_OVER`, any STOMP disconnect for a match player immediately starts a 5-minute countdown, regardless of the current phase (`PRE_MATCH_MAIN_ORDER_SELECTION`, `PRE_MATCH_SUPPORT_SELECTION`, `RENEWAL`, `ASCENSION`, `ACTION_STRATEGY`, or `BATTLE`). The server publishes `PLAYER_CONNECTION_CHANGED` with `connected: false` and records the server time. If the player reconnects and authenticates as the same Principal within five minutes, the server publishes `connected: true` and the client requests snapshots. If five minutes elapse while still disconnected, the server ends the match with `DISCONNECTED` — the disconnected player loses — cancels any pending phase timers or Battle executions, and emits `MATCH_ENDED`.
+```json
+// TICK_RESOLVED payload for a normal, non-drawn match end
+"matchResult": { "reason": "HP_REACHED_ZERO", "winnerPlayerId": "user-001", "loserPlayerId": "user-002" }
+```
 
-`SURRENDER` is accepted from any match player before `GAME_OVER`; it ends the match immediately with the opponent as winner. When `MATCH_ENDED` arrives, Redux stops local presentation timers and React Router navigates both clients to `/results/{matchId}`.
+**Disconnect handling applies to the whole match lifecycle**, not just Battle: from `MATCH_CREATED` through `GAME_OVER`, any STOMP disconnect for a match player immediately starts a 5-minute countdown, regardless of the current phase (`PRE_MATCH_MAIN_ORDER_SELECTION`, `PRE_MATCH_SUPPORT_SELECTION`, `RENEWAL`, `ASCENSION`, `ACTION_STRATEGY`, or `BATTLE`). The server publishes `PLAYER_CONNECTION_CHANGED` with `connected: false` and records the server time. If the player reconnects and authenticates as the same Principal within five minutes, the server publishes `connected: true` and the client requests snapshots. If five minutes elapse while still disconnected, the server ends the match with `DISCONNECTED` — the disconnected player loses — cancels any pending phase timers or tick resolutions, and emits `MATCH_ENDED`.
 
 ### Surrender
 
@@ -533,7 +544,7 @@ Disconnect handling applies to the whole match lifecycle, not just Battle: from 
 | --- | --- | --- | --- | --- |
 | `SURRENDER` | `/app/matches/{matchId}/surrender` | `{}` | Caller is a match player; current phase is not `GAME_OVER`; expected MV | Immediately ends the match: public `MATCH_ENDED` with `reason: "SURRENDER"`, opponent as winner |
 
-Surrendering cancels any in-flight phase timers, pending Battle executions, and outstanding confirmations for both players.
+Surrendering cancels any in-flight phase timers, pending Battle ticks, and outstanding confirmations for both players.
 
 ## Error codes
 
@@ -541,8 +552,7 @@ Surrendering cancels any in-flight phase timers, pending Battle executions, and 
 | --- | --- |
 | `UNAUTHORIZED`, `TOKEN_EXPIRED`, `INVALID_TOKEN` | Authentication is absent, expired, or invalid |
 | `ROOM_NOT_FOUND`, `ROOM_FULL`, `ROOM_ALREADY_STARTED` | Room cannot be joined or used |
-| `PLAYER_NOT_IN_ROOM`, `NOT_ROOM_HOST`, `PLAYERS_NOT_READY` | Caller lacks room authority or start requirements fail |
-| `PLAYER_DISCONNECTED` | A room member is not currently WebSocket-connected; blocks `START_MATCH` |
+| `PLAYER_NOT_IN_ROOM`, `NOT_ROOM_HOST`, `PLAYERS_NOT_READY`, `PLAYER_DISCONNECTED` | Caller lacks room authority, start requirements fail, or a room member is not currently connected |
 | `MATCH_NOT_FOUND`, `PLAYER_NOT_IN_MATCH`, `MATCH_NOT_FINISHED` | Match resource or membership is invalid |
 | `INVALID_MATCH_PHASE` | Command cannot run in current phase |
 | `STALE_ROOM_VERSION`, `STALE_MATCH_VERSION` | Caller must request/reconcile a snapshot |
@@ -609,6 +619,14 @@ export interface AscensionAllocation {
   techniqueId?: string;
   learningPoints: number;
 }
+
+export interface TickActionOutcome {
+  playerId: string;
+  actionId: string | null;
+  status: 'SUCCESS' | 'FAILED';
+  failureReason?: 'INSUFFICIENT_RESOURCE' | 'DISABLED_BY_EFFECT' | 'EMPTY_SLOT';
+  effects: Array<{ type: string; value: number; appliedTo: string }>;
+}
 ```
 
 ```java
@@ -629,6 +647,7 @@ public record SelectSupportLoadoutPayload(String supportOrderId, String supportT
 public record ActionQueueDraftPayload(List<String> actionIds) {}
 public record AscensionAllocation(String target, String stat, String techniqueId, int learningPoints) {}
 public record AscensionDraftPayload(List<AscensionAllocation> allocations) {}
+public record KickPlayerPayload(String targetPlayerId) {}
 ```
 
 Java handlers get the player identity from `Principal`, then load the room/match and validate membership server-side. Payload records contain no `playerId` by design.
@@ -693,17 +712,17 @@ sequenceDiagram
 
   S-->>A: BATTLE_STARTED
   S-->>B: BATTLE_STARTED
-  S-->>A: ACTION_REVEALED
-  S-->>B: ACTION_REVEALED
-  S-->>A: ACTION_RESOLVED
-  S-->>B: ACTION_RESOLVED
+  S-->>A: TICK_REVEALED
+  S-->>B: TICK_REVEALED
+  S-->>A: TICK_RESOLVED
+  S-->>B: TICK_RESOLVED
 
   alt Queue exhausted and no winner
     S-->>A: ROUND_ENDED
     S-->>B: ROUND_ENDED
     S-->>A: Next RENEWAL
     S-->>B: Next RENEWAL
-  else HP reaches zero, surrender, or five-minute disconnect
+  else HP reaches zero (or both reach zero), surrender, or five-minute disconnect
     S-->>A: MATCH_ENDED
     S-->>B: MATCH_ENDED
   end
@@ -712,9 +731,9 @@ sequenceDiagram
 ## Security and client-state rules
 
 * Derive player identity solely from JWT and `Principal`; never trust client-supplied player identity.
-* Authorize every REST read, STOMP command, snapshot request, and room/match subscription against membership. Require host authority to start a room.
+* Authorize every REST read, STOMP command, snapshot request, and room/match subscription against membership. Require host authority to start a room or kick a player.
 * Validate the public version, current phase, and command idempotency before state mutation.
 * Use `commandId` as an idempotency key. A retry must not spend LP twice, confirm twice, change readiness twice, or create a second match.
 * Never publish a confirmed-but-unrevealed Main Order, Support loadout, Ascension allocation, or Action Queue to a public topic. Publish only a player confirmation flag until the phase resolves.
-* Never send the complete future execution plan; expose a Battle Action only through `ACTION_REVEALED`.
+* Never send the complete future tick plan; expose a tick's Actions only through `TICK_REVEALED`, never upcoming ticks.
 * Redux reducers consume authoritative public events/snapshots; `/user/queue/errors` is used only for the signed-in player's rejected commands. RTK Query owns REST data and reload-safe snapshots. Client animation timing is presentation only.
