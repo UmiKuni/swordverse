@@ -1,6 +1,6 @@
 # SwordVerse
 
-SwordVerse is an online 1v1 auto-combat game about building a sword-fighting style, preparing an Action Queue, and watching both players resolve their plans simultaneously.
+SwordVerse is an online 1v1 auto-combat game about building a sword-fighting style, preparing an Action Queue on a shared timeline, and watching both players resolve their plans simultaneously.
 
 The game is designed for short private matches between friends.
 
@@ -15,25 +15,30 @@ Sign in, then:
 
 Both players must be present, connected, and ready before the host can start the match.
 
-### 2. Build your five-Action loadout
+### 2. Build your six-Action loadout
 
-Each player prepares exactly five Actions:
+Each player has exactly six Actions:
 
 ```text
-1 Basic Action
-3 Main Actions
-1 Support Action
+2 Basic Actions: Slash and Guard
+3 Main Sect Techniques
+1 Support Sect Technique
 ```
 
-First, select a **Main Sect** and three Actions from that Sect.
+First, select a **Main Sect** and three Techniques from that Sect.
 
-Then, select a **Support Sect** and one Action from it. Your Support Sect may be the same as your Main Sect, but the Support Action cannot duplicate a Main Action and cannot be an **Ultimate**.
+Then, select a **Support Sect** and one Technique from it. Your Support Sect may be the same as your Main Sect, but the Support Technique cannot duplicate a Main Technique and cannot be an **Ultimate**.
 
 Actions may be:
 
-- **Active** — can be added to your Action Queue.
-- **Passive** — activates automatically when its condition is met.
-- **Ultimate** — a Sect's special Action; it may only be selected as a Main Action.
+- **Active** — learned Actions that can be added to the Action Queue.
+- **Passive** — Actions that activate automatically when their conditions are met.
+- **Ultimate** — a Sect's special Technique; it may only be selected as a Main Technique.
+
+Active Actions also define how their Effects resolve:
+
+- **Resolve on completion** — the Effect occurs at the end of the Action's duration, such as an attack dealing damage.
+- **Active during execution** — the Effect remains active throughout the Action's `(start, end]` interval, such as Guard increasing DEF.
 
 ### 3. Play each round
 
@@ -54,29 +59,36 @@ The server resolves ongoing Effects, converts remaining MP into QP, and restores
 
 Spend up to 2 Learning Points to:
 
-- Upgrade a Stat.
+- Upgrade `HP`, `STR`, `DEF`, or `AS`.
 - Learn a locked Action.
 - Level up a learned Action.
 
-An Action at level 0 is locked. An Action at level 1 or higher is learned.
+Stats and Actions have a maximum level of 3. An Action at level 0 is locked; an Action at level 1 or higher is learned.
 
 #### Action Strategy
 
-Build your Action Queue using learned Active Actions from your five-Action loadout.
+Build your Action Queue using learned Active Actions from your six-Action loadout.
 
-You may add the same Active Action more than once.
+Queue capacity is a duration limit, not a number of Actions. Time is measured in `0.1` second ticks. A queue is valid only when:
+
+- Its total effective duration does not exceed the round's duration limit.
+- Every Action satisfies its cooldown and stack rules.
+- The player has sufficient predictable resources for its costs.
+- After round 1, it is derived from the previous queue by removing zero or one occurrence, preserving retained order, and inserting new Actions anywhere.
+
+Basic Action duration is divided by `AS`, rounded down to the nearest `0.1` second, with a minimum duration of one tick. Main and Support Sect Technique durations are not changed by `AS`.
+
+You may ask the server to check whether the current queue is valid before confirming it. This check is advisory: confirming does not validate or block the submitted queue.
+
+During Battle, the server checks each Action occurrence against the current runtime state. An invalid occurrence is removed from execution and resolved as an `EMPTY_SLOT`; it produces no Action Effects while the opponent's timeline continues normally.
 
 #### Battle
 
-Both queues resolve together:
+Both queues start at time `0` and resolve on the same `0.1` second timeline. There is no initiative or alternating turn order.
 
-```text
-Your first Action     ↔ Opponent's first Action
-Your second Action    ↔ Opponent's second Action
-...
-```
+An Action occupies `(start, end]`. An attack that resolves on completion applies its damage at `end`; a continuous defensive Action remains active at that same endpoint and can defend against the attack.
 
-There is no turn order or initiative. Each pair resolves as one Battle tick.
+Some Actions create Effects that outlive their execution. For example, an Action may create a one-charge Shield that lasts two seconds, negates the next incoming damage instance, and is then removed.
 
 ### 4. Win the match
 
@@ -86,24 +98,24 @@ The match ends when:
 - A player surrenders.
 - A player remains disconnected for more than five minutes.
 
-If both players reach 0 HP in the same tick, the match is a draw.
+If both players reach 0 HP at the same timeline point, the match is a draw.
 
-## Core Stats
+## Core Stats and Resources
 
-| Stat | Meaning |
+| Value | Meaning |
 |---|---|
-| `STR` | Offensive power. |
-| `HP` | Health. Reaching 0 ends the match. |
-| `DEF` | Damage reduction. |
-| `AS` | Attack speed used by server-side Action resolution. |
-| `MP` | Resource used to activate Actions. |
-| `QP` | Special resource used by selected Actions. |
+| `STR` | Offensive power. Upgradeable during Ascension. |
+| `HP` | Health. Reaching 0 ends the match. Upgradeable during Ascension. |
+| `DEF` | Damage reduction. Upgradeable during Ascension. |
+| `AS` | Reduces Basic Action duration. Upgradeable during Ascension. |
+| `MP` | Resource used to activate Actions; not upgraded during Ascension. |
+| `QP` | Special resource used by selected Actions; not upgraded during Ascension. |
 
 HP, MP, and QP have current and maximum values. Restoration cannot exceed the current maximum.
 
 ## Detailed Rules
 
-For complete rules, timing, selection restrictions, queue behavior, Passive Actions, Effects, disconnect handling, and match-end resolution, see [RULES.md](RULES.md).
+For complete rules, timing, selection restrictions, queue validation, cooldowns, stacks, Passive Actions, Effects, disconnect handling, and match-end resolution, see [RULES.md](RULES.md).
 
 ## Technical Documentation
 
