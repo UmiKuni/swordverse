@@ -1,33 +1,55 @@
 package com.swordverse.server.auth.persistence.entity;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
+import java.util.Objects;
 import java.util.UUID;
 
-import com.swordverse.server.common.persistence.BaseEntity;
+import com.swordverse.server.common.persistence.AuditedEntity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Table;
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.EqualsAndHashCode;
+import lombok.AccessLevel;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.experimental.SuperBuilder;
 
-@EqualsAndHashCode(callSuper = true)
-@Data
-@NoArgsConstructor
-@AllArgsConstructor
-@SuperBuilder
-@Table(name = "sessions")
 @Entity
-public class SessionEntity extends BaseEntity {
-    @Column(name = "user_id")
+@Table(name = "sessions")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public class SessionEntity extends AuditedEntity {
+    @Column(name = "user_id", nullable = false)
     private UUID userId;
 
-    private LocalDateTime accessTokenExpiresAt;
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private SessionStatus status;
 
-    private LocalDateTime refreshTokenExpiresAt;
+    @Column(name = "access_token_expires_at", nullable = false)
+    private Instant accessTokenExpiresAt;
 
-    private LocalDateTime revokedAt;
+    @Column(name = "refresh_token_expires_at", nullable = false)
+    private Instant refreshTokenExpiresAt;
+
+    @Column(name = "revoked_at")
+    private Instant revokedAt;
+
+    public SessionEntity(UUID userId, Instant accessTokenExpiresAt,
+            Instant refreshTokenExpiresAt) {
+
+        if (accessTokenExpiresAt.isAfter(refreshTokenExpiresAt)) {
+            throw new IllegalArgumentException("Access token cannot expire after refresh token");
+        }
+        this.userId = Objects.requireNonNull(userId, "User ID cannot be null");
+        this.status = SessionStatus.ACTIVE;
+        this.accessTokenExpiresAt = Objects.requireNonNull(accessTokenExpiresAt, "Access token expiration time cannot be null");
+        this.refreshTokenExpiresAt = Objects.requireNonNull(refreshTokenExpiresAt, "Refresh token expiration time cannot be null");
+    }
+
+    public void revoke(Instant revokedAt) {
+        this.status = SessionStatus.REVOKED;
+        this.revokedAt = Objects.requireNonNull(revokedAt, "Revoked at cannot be null");
+    }
 }

@@ -1,35 +1,39 @@
 package com.swordverse.server.auth.persistence.entity;
 
-import java.util.UUID;
-
-import com.swordverse.server.common.persistence.BaseEntity;
+import com.swordverse.server.common.persistence.AuditedEntity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
 import jakarta.persistence.Table;
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.EqualsAndHashCode;
+import lombok.AccessLevel;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.experimental.SuperBuilder;
 
-@EqualsAndHashCode(callSuper = true)
-@Data
-@NoArgsConstructor
-@AllArgsConstructor
-@SuperBuilder
-@Table(name = "users")
 @Entity
-public class UserEntity extends BaseEntity {
+@Table(name = "users")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public class UserEntity extends AuditedEntity {
     @Column(unique = true, nullable = false, length = 50)
     private String username;
 
     @Column(nullable = false, name = "password_hash")
     private String passwordHash;
 
-    @Column(name = "display_name", length = 50) // If null, show username instead
+    @Column(name = "display_name", length = 100) // If null, show username instead
     private String displayName;
+
+    public UserEntity(String username, String passwordHash, String displayName) {
+        this.username = username;
+        this.passwordHash = passwordHash;
+        this.displayName = displayName;
+    }
+
+    public void updateDisplayName(String displayName) {
+        this.displayName = displayName;
+    }
+
+    public void updatePasswordHash(String passwordHash) {
+        this.passwordHash = passwordHash;
+    }
 }
