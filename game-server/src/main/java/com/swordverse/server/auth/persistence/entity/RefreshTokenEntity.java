@@ -1,6 +1,7 @@
 package com.swordverse.server.auth.persistence.entity;
 
 import java.time.Instant;
+import java.util.Objects;
 import java.util.UUID;
 
 import com.swordverse.server.common.persistence.CreatedEntity;
@@ -31,12 +32,22 @@ public class RefreshTokenEntity extends CreatedEntity {
     private Instant revokedAt;
 
     public RefreshTokenEntity(UUID sessionId, String tokenHash, Instant expiresAt) {
-        this.sessionId = sessionId;
-        this.tokenHash = tokenHash;
-        this.expiresAt = expiresAt;
+        this.sessionId = Objects.requireNonNull(sessionId, "Session ID must not be null");
+        this.tokenHash = checkTokenHash(tokenHash);
+        this.expiresAt = Objects.requireNonNull(expiresAt, "Expiration time must not be null");
     }
 
     public void revoke(Instant revokedAt) {
-        this.revokedAt = revokedAt;
+        this.revokedAt = Objects.requireNonNull(revokedAt, "Revoked at must not be null");
+    }
+
+    private String checkTokenHash(String tokenHash) {
+        Objects.requireNonNull(tokenHash, "Token hash must not be null");
+
+        if (tokenHash.isBlank()) {
+            throw new IllegalArgumentException("Token hash must not be blank");
+        }
+
+        return tokenHash;
     }
 }

@@ -39,17 +39,32 @@ public class SessionEntity extends AuditedEntity {
     public SessionEntity(UUID userId, Instant accessTokenExpiresAt,
             Instant refreshTokenExpiresAt) {
 
-        if (accessTokenExpiresAt.isAfter(refreshTokenExpiresAt)) {
-            throw new IllegalArgumentException("Access token cannot expire after refresh token");
+        Instant validAccessTokenExpirationAt = Objects.requireNonNull(accessTokenExpiresAt,
+                "Access token expiration time cannot be null");
+        Instant validRefreshTokenExpirationAt = Objects.requireNonNull(refreshTokenExpiresAt,
+                "Refresh token expiration time cannot be null");
+
+        if (validAccessTokenExpirationAt.isAfter(validRefreshTokenExpirationAt)) {
+            throw new IllegalArgumentException(
+                    "Access token cannot expire after refresh token");
         }
+
         this.userId = Objects.requireNonNull(userId, "User ID cannot be null");
         this.status = SessionStatus.ACTIVE;
-        this.accessTokenExpiresAt = Objects.requireNonNull(accessTokenExpiresAt, "Access token expiration time cannot be null");
-        this.refreshTokenExpiresAt = Objects.requireNonNull(refreshTokenExpiresAt, "Refresh token expiration time cannot be null");
+        this.accessTokenExpiresAt = validAccessTokenExpirationAt;
+        this.refreshTokenExpiresAt = validRefreshTokenExpirationAt;
     }
 
     public void revoke(Instant revokedAt) {
+        if (this.status != SessionStatus.ACTIVE) {
+            throw new IllegalStateException(
+                    "Session is already revoked or expired");
+        }
+        Instant validRevokedAt = Objects.requireNonNull(
+                revokedAt,
+                "Revoked at cannot be null");
+
         this.status = SessionStatus.REVOKED;
-        this.revokedAt = Objects.requireNonNull(revokedAt, "Revoked at cannot be null");
+        this.revokedAt = validRevokedAt;
     }
 }
