@@ -132,7 +132,7 @@ For complete rules, timing, selection restrictions, queue validation, cooldowns,
 - Spring Boot
 - Spring WebSocket
 - PostgreSQL
-- JWT access tokens with server-side sessions and rotating refresh tokens
+- JWT access tokens with server-side sessions and rotating opaque refresh tokens stored in host-only `HttpOnly`, `Secure`, `SameSite=Strict` cookies
 
 ## Project Status
 

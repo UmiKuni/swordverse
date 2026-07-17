@@ -17,7 +17,7 @@ import lombok.NoArgsConstructor;
 @Table(name = "refresh_tokens")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class RefreshTokenEntity extends CreatedEntity {
+public class RefreshToken extends CreatedEntity {
 
     @Column(name = "session_id", nullable = false)
     private UUID sessionId;
@@ -31,17 +31,30 @@ public class RefreshTokenEntity extends CreatedEntity {
     @Column(name = "revoked_at")
     private Instant revokedAt;
 
-    public RefreshTokenEntity(UUID sessionId, String tokenHash, Instant expiresAt) {
+    public RefreshToken(UUID sessionId, String tokenHash, Instant expiresAt) {
         this.sessionId = Objects.requireNonNull(sessionId, "Session ID must not be null");
         this.tokenHash = checkTokenHash(tokenHash);
         this.expiresAt = Objects.requireNonNull(expiresAt, "Expiration time must not be null");
     }
 
     public void revoke(Instant revokedAt) {
+        if (this.revokedAt != null) {
+            throw new IllegalStateException("Refresh token is already revoked");
+        }
+
         this.revokedAt = Objects.requireNonNull(revokedAt, "Revoked at must not be null");
     }
 
-    private String checkTokenHash(String tokenHash) {
+    public boolean isRevoked() {
+        return revokedAt != null;
+    }
+
+    public boolean isExpiredAt(Instant instant) {
+        Objects.requireNonNull(instant, "Comparison time must not be null");
+        return !expiresAt.isAfter(instant);
+    }
+
+    private static String checkTokenHash(String tokenHash) {
         Objects.requireNonNull(tokenHash, "Token hash must not be null");
 
         if (tokenHash.isBlank()) {

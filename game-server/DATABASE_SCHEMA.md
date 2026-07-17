@@ -236,7 +236,7 @@ Room and Match Runtime
 
 This section defines the database tables used for authentication, session management, and refresh token rotation.
 
-The authentication model uses short-lived JWT access tokens together with server-side sessions and refresh tokens. The JWT contains a `session_id`, but the session state is still validated against the database. This allows the server to revoke sessions, support logout, and invalidate refresh tokens securely.
+The authentication model uses short-lived JWT access tokens together with server-side sessions and rotating opaque refresh tokens. The JWT contains `userId` and `sessionId`, but the session state is still validated against the database. The raw refresh token is delivered only in a host-only `HttpOnly` cookie; only its hash is stored. This allows the server to revoke sessions, support logout, and invalidate refresh tokens securely.
 
 ---
 
@@ -303,7 +303,7 @@ This table allows the server to revoke a session even if the JWT access token ha
 
 | Column | Type | Key | Nullable | Description |
 |---|---|---:|---:|---|
-| `id` | `uuid` | PK | No | Unique identifier of the session. This value is included in the JWT access token as `session_id`. |
+| `id` | `uuid` | PK | No | Unique identifier of the session. This value is included in the JWT access token as `sessionId`. |
 | `user_id` | `uuid` | FK | No | User who owns this session. References `users.id`. |
 | `status` | `varchar(20)` |  | No | Current session status. |
 | `access_token_expires_at` | `timestamptz` |  | No | Expiration time of the latest access token issued for this session. |
@@ -348,7 +348,7 @@ When the server receives an authenticated request, it validates the access token
 ```text
 1. Verify the JWT signature.
 2. Check the JWT `exp` claim.
-3. Extract `user_id` and `session_id` from the JWT payload.
+3. Extract `userId` and `sessionId` from the JWT payload (`sub` also identifies the user).
 4. Find the session by `sessions.id`.
 5. Ensure the session belongs to the same user.
 6. Ensure `sessions.status = 'ACTIVE'`.

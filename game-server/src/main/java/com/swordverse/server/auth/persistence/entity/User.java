@@ -15,7 +15,7 @@ import lombok.NoArgsConstructor;
 @Table(name = "users")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class UserEntity extends AuditedEntity {
+public class User extends AuditedEntity {
     @Column(unique = true, nullable = false, length = 50)
     private String username;
 
@@ -25,7 +25,7 @@ public class UserEntity extends AuditedEntity {
     @Column(name = "display_name", length = 100) // If null, show username instead
     private String displayName;
 
-    public UserEntity(String username, String passwordHash, String displayName) {
+    public User(String username, String passwordHash, String displayName) {
         this.username = checkUsername(username);
         this.passwordHash = checkPasswordHash(passwordHash);
         this.displayName = checkDisplayName(displayName);

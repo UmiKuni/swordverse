@@ -184,11 +184,11 @@ Passive Actions may trigger from gameplay events produced during resolution. Pas
 The server issues:
 
 - A short-lived signed JWT access token.
-- A rotating opaque refresh token.
+- A rotating opaque refresh token delivered only through a host-only `HttpOnly` cookie named `swordverse_refresh`.
 
 The access token contains `userId`, `sessionId`, and `exp`. For protected requests, the server verifies the signature and expiration, then requires the referenced session to be active and not revoked.
 
-Only refresh-token hashes are stored. A successful refresh revokes the submitted refresh token and creates a new token for the same session.
+Only refresh-token hashes are stored. The raw refresh token is never exposed to frontend JavaScript or returned in JSON. A successful refresh reads the cookie, revokes the submitted refresh token, creates a new token for the same session, and replaces the cookie. The cookie uses `Secure` in production, `SameSite=Strict`, and path `/api/auth`.
 
 ### 4.2 Authentication endpoints
 
@@ -213,7 +213,6 @@ Response `201 Created`:
 {
   "accessToken": "jwt-access-token",
   "accessTokenExpiresAt": 1783770900000,
-  "refreshToken": "opaque-refresh-token",
   "refreshTokenExpiresAt": 1784374800000,
   "sessionId": "3db08711-f29f-45fd-a579-2b53ec79d21e",
   "user": {
@@ -248,14 +247,10 @@ Errors: `INVALID_CREDENTIALS`, `VALIDATION_ERROR`.
 
 ```http
 POST /api/auth/refresh
-Content-Type: application/json
+Cookie: swordverse_refresh=<opaque-refresh-token>
 ```
 
-```json
-{
-  "refreshToken": "opaque-refresh-token"
-}
-```
+The request has no JSON body. The browser sends the host-only `HttpOnly` refresh-token cookie automatically.
 
 Response `200 OK`: rotated `AuthSessionResponse`.
 
@@ -266,14 +261,10 @@ Errors: `INVALID_TOKEN`, `TOKEN_EXPIRED`, `SESSION_REVOKED`, `TOKEN_REUSE_DETECT
 ```http
 POST /api/auth/logout
 Authorization: Bearer <access-token>
-Content-Type: application/json
+Cookie: swordverse_refresh=<opaque-refresh-token>
 ```
 
-```json
-{
-  "refreshToken": "opaque-refresh-token"
-}
-```
+The request has no JSON body. Logout clears the refresh-token cookie.
 
 Response: `204 No Content`.
 
