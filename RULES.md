@@ -4,7 +4,7 @@
 
 SwordVerse is a server-authoritative online 1v1 auto-combat game.
 
-Players select Sects and Actions, improve their loadouts during Ascension, prepare Action Queues, and resolve both queues simultaneously during Battle.
+Players select Sects and Actions, improve their loadouts during Ascension, prepare Action Queues, and resolve both queues simultaneously on a shared Battle timeline.
 
 The client submits player decisions. The server owns all official validation, calculations, Effect processing, phase transitions, and match results.
 
@@ -28,17 +28,17 @@ Each Sect defines:
 - Main Sect base Stats.
 - Support Sect bonus Stats.
 - An MP-to-QP conversion ratio when used as the Main Sect.
-- A set of Actions, normally around five.
+- A set of Sect Techniques, normally around five.
 
 The Support Sect may be the same as the Main Sect.
 
-### 3.2 Action classifications
+### 3.2 Action source and activation type
 
 Every Action has a source:
 
 ```text
 BASIC
-SECT
+SECT_TECHNIQUE
 ```
 
 Every Action has an activation type:
@@ -48,26 +48,66 @@ ACTIVE
 PASSIVE
 ```
 
-A Sect Action may additionally be marked as an **Ultimate**.
+Only learned Active Actions may be placed in the Action Queue. Passive Actions activate automatically when server-observed conditions are met and cannot be queued.
 
-These classifications are independent. For example, an Ultimate may be active or passive.
+A Sect Technique may additionally be marked as an **Ultimate**. Source, activation type, and Ultimate status are independent classifications.
 
-### 3.3 Active Actions
+### 3.3 Active Action resolution type
 
-Active Actions:
+Every Active Action defines one resolution type:
 
-- May be added to the Action Queue when learned.
-- May appear more than once in the same queue.
-- Resolve during Battle when their queue position is reached.
-- May fail if their cost cannot be paid or an Effect disables them.
+```text
+RESOLVE_ON_COMPLETION
+ACTIVE_DURING_EXECUTION
+```
 
-### 3.4 Passive Actions
+`RESOLVE_ON_COMPLETION` means the Action prepares throughout its duration and applies its configured Effects at the endpoint. For example, an Attack occupying `(0.0, 1.0]` deals damage at `1.0`.
 
-Passive Actions:
+`ACTIVE_DURING_EXECUTION` means the configured Effects remain active throughout the complete `(start, end]` execution interval. For example, Guard occupying `(0.0, 1.0]` increases DEF throughout that interval, including at `1.0`, and can defend against an Attack that resolves at `1.0`.
 
-- Remain in the player's five-Action loadout.
-- Cannot be added to the Action Queue.
-- Activate automatically when server-observed conditions are met.
+### 3.4 Action components
+
+Each Action level defines:
+
+- **Duration** — execution time.
+- **Cooldown** — required waiting time after the Action or its consecutive stack chain ends.
+- **Stack** — maximum number of immediately consecutive uses before cooldown applies.
+- **Costs** — MP, QP, HP, or other configured resources paid for each use.
+
+Time is represented by integer ticks. One tick is `0.1` second.
+
+For a Basic Action:
+
+```text
+rawDurationSeconds = baseDurationSeconds / AS
+effectiveDurationTicks = max(1, floor(rawDurationSeconds * 10))
+```
+
+This rounds down to the nearest `0.1` second. For example, `0.333` second becomes `0.3` second, or 3 ticks. Main and Support Sect Technique durations are not modified by `AS`.
+
+### 3.5 Stack and cooldown
+
+`stack = N` permits at most `N` immediately consecutive occurrences of the same Action. Consecutive stacked occurrences must have no gap between them. Each occurrence pays its own costs.
+
+Cooldown begins at the end of the final occurrence in the consecutive stack chain. The next occurrence must satisfy:
+
+```text
+nextStart >= stackChainEnd + cooldown
+```
+
+For `stack = 1`, cooldown begins after every occurrence.
+
+### 3.6 Persistent Effects created by Actions
+
+An Action may create an Effect whose lifetime differs from the Action's execution duration. Such an Effect remains active until its lifetime expires or its removal condition is met.
+
+Example: a Shield Action may execute for 1 second and then create a Shield Effect with a 2-second lifetime and one charge. The Shield negates the next incoming damage instance and is removed immediately when its charge is consumed. A later attack deals damage normally.
+
+Actions or Effects that dynamically change another Action's duration or cooldown are reserved for a future version and are not implemented in the next version.
+
+### 3.7 Passive Actions
+
+Passive Actions remain in the player's six-Action loadout and activate automatically when their configured conditions are met.
 
 Example conditions include:
 
@@ -85,9 +125,9 @@ Passive progress is current runtime state, not Battle history. A three-hit passi
 Each player secretly selects:
 
 - One Main Sect.
-- Exactly three distinct Actions belonging to that Sect.
+- Exactly three distinct Techniques belonging to that Sect.
 
-Main Actions may be active, passive, or Ultimate.
+Main Techniques may be active, passive, or Ultimate.
 
 After both players confirm, both Main loadouts are revealed simultaneously.
 
@@ -96,11 +136,11 @@ After both players confirm, both Main loadouts are revealed simultaneously.
 Each player then secretly selects:
 
 - One Support Sect.
-- Exactly one Action belonging to that Sect.
+- Exactly one Technique belonging to that Sect.
 
-The Support Action:
+The Support Technique:
 
-- Must not duplicate any selected Main Action.
+- Must not duplicate any selected Main Technique.
 - Must not be an Ultimate.
 - May be active or passive.
 
@@ -108,17 +148,18 @@ After both players confirm, both Support loadouts are revealed simultaneously.
 
 ### 4.3 Final loadout
 
-Each player has exactly five Action slots:
+Each player has exactly six Action slots:
 
 ```text
-BASIC
+BASIC_SLASH
+BASIC_GUARD
 MAIN_1
 MAIN_2
 MAIN_3
 SUPPORT
 ```
 
-The Basic Action starts at level 1.
+Both Basic Actions start at level 1.
 
 Other Actions may begin locked:
 
@@ -127,18 +168,22 @@ currentLevel = 0  → locked
 currentLevel >= 1 → learned
 ```
 
-A selected but locked Action remains in the loadout and can be learned during Ascension.
+A selected but locked Action remains in the loadout and can be learned during Ascension. Every Action has a maximum level of 3.
+
+`MAIN` and `SUPPORT` describe loadout roles, not intrinsic Technique types.
 
 ## 5. Stats and Resources
 
-| Stat | Meaning |
+| Value | Meaning |
 |---|---|
 | `STR` | Offensive power used by server damage calculations. |
 | `HP` | Health. Reaching 0 satisfies a match-end condition. |
 | `DEF` | Damage reduction used by server calculations. |
-| `AS` | Attack speed used by server Action-resolution rules. |
+| `AS` | Attack speed that reduces Basic Action duration. |
 | `MP` | Resource consumed by Actions. |
 | `QP` | Special resource consumed by selected Actions. |
+
+Every Stat has a maximum level of 3. During Ascension, only `HP`, `STR`, `DEF`, and `AS` may be upgraded. `MP` and `QP` are resources and cannot be upgraded during Ascension.
 
 HP, MP, and QP have current and maximum values:
 
@@ -181,12 +226,7 @@ Resolution order:
 5. Resolve active Effects scheduled for `RENEWAL_END`.
 6. Remove expired Effects.
 
-Different Effects may use different trigger timings. For example:
-
-- Bleed may deal damage at `RENEWAL_START`.
-- Regeneration may restore HP at `RENEWAL_END`.
-
-An Effect's duration decreases according to its configured lifecycle after it executes at the relevant timing.
+Different Effects may use different trigger timings. An Effect's duration decreases according to its configured lifecycle after it executes at the relevant timing.
 
 ## 8. Ascension
 
@@ -194,9 +234,11 @@ At the beginning of every round, each player receives 2 Learning Points.
 
 Learning Points may be used to:
 
-- Upgrade `STR`, `HP`, `DEF`, `AS`, `MP`, or `QP`.
+- Upgrade `HP`, `STR`, `DEF`, or `AS`, up to level 3.
 - Learn a selected Action by changing its level from 0 to 1.
-- Upgrade a learned Action to a higher configured level.
+- Upgrade a learned Action, up to level 3.
+
+`MP` and `QP` cannot be upgraded during Ascension.
 
 Rules:
 
@@ -209,87 +251,125 @@ Rules:
 
 ## 9. Action Strategy
 
-### 9.1 Queue size
+### 9.1 Queue duration limit
 
-| Round | Required Queue Size |
+Queue capacity is the maximum timeline duration that a sequence of Actions may occupy, not a required number of Action entries.
+
+| Round | Duration Limit |
 |---:|---:|
-| 1 | 2 |
-| 2 | 3 |
-| 3 | 4 |
-| 4 | 5 |
-| 5 | 6 |
-| 6+ | 7 |
+| 1 | 2 seconds |
+| 2 | 3 seconds |
+| 3 | 4 seconds |
+| 4 | 5 seconds |
+| 5 | 6 seconds |
+| 6+ | 7 seconds |
+
+A queue may use less than the available duration. It is invalid only when its total effective duration exceeds the limit.
 
 ### 9.2 Eligible Actions
 
 An Action may be added to the queue only when:
 
-- It belongs to one of the player's five Action slots.
+- It belongs to one of the player's six Action slots.
 - Its current level is at least 1.
 - Its activation type is `ACTIVE`.
 
-Passive Actions cannot be queued.
-
-The same eligible Action slot may be added multiple times.
+Passive Actions cannot be queued. The same eligible Action slot may be added multiple times when its stack and cooldown constraints are satisfied.
 
 ### 9.3 Queue changes after round 1
 
-When preparing the next queue:
+The next round's queue is derived from the previous round's confirmed queue:
 
-1. Remove at most one occurrence from the previous queue.
-2. Preserve the relative order of retained occurrences.
+```text
+nextQueue = insertNewActions(removeZeroOrOne(previousConfirmedQueue))
+```
+
+Rules:
+
+1. Remove zero or one occurrence from the previous confirmed queue.
+2. Preserve the relative order of all retained occurrences.
 3. Insert newly selected occurrences at the beginning, end, or between retained occurrences.
+4. Validate the complete resulting queue against the current round's duration, cooldown, stack, eligibility, and predictable resource rules.
 
-### 9.4 Confirmation and timeout
+### 9.4 Queue validation
 
-- A player may submit between zero Actions and the required queue size.
-- Submitting confirms the queue and prevents further edits.
-- The queue remains hidden from the opponent until each position is revealed during Battle.
-- If the phase times out before confirmation, the server uses an empty submission for that player.
-- Every missing queue position becomes an explicit `EMPTY_TIMEOUT` position.
+Before confirming, a player may request an authoritative preview validation of the current queue any number of times. Checking does not confirm or lock the queue, and its result is advisory because runtime state may change before an Action executes.
 
-An empty position performs no Action during its Battle tick.
+The server returns whether the queue is valid and all detected violations, including the relevant Action occurrence where possible:
+
+```text
+DURATION_LIMIT_EXCEEDED
+COUNTDOWN_INVALID
+INSUFFICIENT_RESOURCE
+```
+
+Validation checks:
+
+- Total effective duration does not exceed the round's duration limit.
+- Cooldown and consecutive stack rules are satisfied.
+- The player has sufficient predictable MP, QP, HP, and other configured resources, evaluated in queue order.
+- The queue satisfies the previous-round removal and retained-order rules.
+- Every occurrence references an eligible Action.
+
+Resource changes that depend on unknown opponent Actions or unresolved Battle outcomes cannot be guaranteed during queue validation. All Action occurrences are therefore checked against the actual state at runtime.
+
+### 9.5 Confirmation and timeout
+
+- Confirming does not run queue validation again.
+- Confirmation does not reject or block an invalid queue.
+- A successful confirmation locks the submitted queue for the round.
+- The complete queue remains hidden from the opponent and is revealed only as Battle progresses.
+- If the phase times out before confirmation, the server uses an empty queue for that player.
+
+Invalid Action occurrences are handled during Battle rather than during confirmation.
 
 ## 10. Battle
 
-### 10.1 Simultaneous ticks
+### 10.1 Shared timeline
 
-Both queues resolve in lockstep:
+Both queues start at time `0` and execute on the same timeline. One tick is `0.1` second.
+
+Actions within each player's queue execute sequentially. Because Actions may have different durations, the two players' Action boundaries do not need to align. There is no initiative and no alternating turn order.
+
+Every Action occupies the interval:
 
 ```text
-Tick 0: Player A slot 0 ↔ Player B slot 0
-Tick 1: Player A slot 1 ↔ Player B slot 1
-...
+(start, end]
 ```
 
-There is no initiative and no alternating turn order.
+The start boundary is excluded and the end boundary is included. Therefore, an `ACTIVE_DURING_EXECUTION` defense remains active when a `RESOLVE_ON_COMPLETION` attack resolves at the same `end` time.
 
-The outcome of a tick depends on both Actions and the current runtime state. Examples:
+All events scheduled for the same timeline point are resolved by deterministic server rules. Defensive Effects that are active at that point participate in damage resolution.
 
-- Two attacking Actions may damage both players.
-- An attack against a counter may damage only the attacker.
-- An attack against a guard may deal no damage.
+### 10.2 Runtime Action validation
 
-These are examples, not universal categories. The server resolves configured costs, triggers, Effects, and exceptional Action behavior.
+The server validates each Action occurrence when Battle reaches it, using the actual runtime state. Runtime validation includes Action eligibility, cooldown, stack, configured cost, and any other execution requirements.
 
-### 10.2 Action costs
+If an occurrence is invalid:
 
-The server validates all costs when an Action resolves.
+- It is removed from execution and treated as an `EMPTY_SLOT`.
+- It pays no costs and produces no Action Effects.
+- The opponent's timeline continues normally.
 
-- All costs are paid atomically.
+Predictable costs may be reported by the optional queue check, but only the runtime check determines whether an occurrence executes.
+
+### 10.3 Action costs
+
+The server checks costs when each Action begins or resolves according to its configured cost timing.
+
+- All costs for one Action occurrence are paid atomically.
 - If any required cost cannot be paid, no cost is paid.
 - The Action fails with `INSUFFICIENT_RESOURCE`.
-- The opponent's Action continues to resolve.
+- The invalid occurrence becomes an `EMPTY_SLOT`, and the opponent's timeline continues to resolve.
 
-### 10.3 Disabled and empty Actions
+### 10.4 Disabled and failed Actions
 
-An Action produces no Effects when:
+An Action produces no configured Effects when:
 
-- Its costs cannot be paid.
+- Its costs cannot be paid at runtime.
 - It is disabled by an active Effect.
-- The queue position is empty.
 
-Failure reasons are:
+Failure reasons include:
 
 ```text
 INSUFFICIENT_RESOURCE
@@ -297,7 +377,7 @@ DISABLED_BY_EFFECT
 EMPTY_SLOT
 ```
 
-### 10.4 Passive triggers
+### 10.5 Passive triggers
 
 Battle resolution emits internal gameplay events such as:
 
@@ -310,36 +390,18 @@ EFFECT_APPLIED
 EFFECT_REMOVED
 ```
 
-The server evaluates learned Passive Actions against these events.
+The server evaluates learned Passive Actions against these events. Triggered Effects and any resulting gameplay events resolve in deterministic order. The server limits passive trigger depth and events per timeline point to prevent infinite trigger loops.
 
-When a passive condition is satisfied:
-
-1. The Passive Action activates.
-2. Its configured Effects resolve.
-3. Its runtime progress resets according to its trigger rule.
-4. Any new gameplay events are evaluated in deterministic order.
-
-The server limits passive trigger depth and the number of events per tick to prevent infinite trigger loops.
-
-### 10.5 Active Effects
+### 10.6 Active Effects
 
 Effects may be:
 
 - Instant.
 - Finite-duration.
+- Charge-based and removed when their charges are consumed.
 - Infinite until removed.
 
-Effects may use these stacking policies:
-
-```text
-NONE
-REFRESH
-STACK
-REPLACE
-STRONGEST_WINS
-```
-
-The server applies each Effect's configured duration, periodic timing, stack limit, and removal rules.
+Effects may use configured stacking, refresh, replacement, priority, lifetime, charge, trigger, and removal rules.
 
 ## 11. Match End Conditions
 
@@ -351,7 +413,7 @@ The match ends immediately when:
 
 ### 11.1 Draw
 
-If both players reach 0 HP during the same tick:
+If both players reach 0 HP at the same timeline point:
 
 ```text
 reason = DRAW
@@ -374,19 +436,9 @@ loser = null
 
 ## 12. Battle Log and History
 
-The frontend may display a lightweight Battle Log using live server events such as:
+The frontend may display a lightweight Battle Log using live server events with round number and timeline tick.
 
-```text
-[Round 1][Tick 0]
-Player A used Quick Slash.
-Player B used Guard.
-Player B HP changed from 100 to 92.
-Player B received Bleed.
-```
-
-SwordVerse does not store a structured replay or complete event history.
-
-The database may store a simple human-readable match summary in `matches.log_text`. This text is for lightweight display and debugging, not deterministic replay.
+SwordVerse does not store a structured replay or complete event history. The database may store a simple human-readable match summary in `matches.log_text` for lightweight display and debugging, not deterministic replay.
 
 ## 13. Static Game Data Updates
 
