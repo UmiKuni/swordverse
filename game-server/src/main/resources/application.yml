@@ -1,0 +1,19 @@
+spring:
+    application:
+        name: game-server
+
+    profiles:
+        active: dev
+
+    datasource:
+        url: jdbc:postgresql://localhost:5432/swordverse_dev
+        username: postgres
+        password: '[4WhLx'
+        driver-class-name: org.postgresql.Driver
+
+    jpa:
+        hibernate:
+            ddl-auto: create-drop
+        database: postgresql
+        show-sql: true
+
