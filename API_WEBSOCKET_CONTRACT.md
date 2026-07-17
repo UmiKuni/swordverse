@@ -11,7 +11,7 @@ The contract covers:
 - Authentication and session renewal
 - Static Sect and Action data
 - Private 1v1 rooms
-- Main and Support loadout selection
+- Basic, Main, and Support loadout selection
 - Renewal, Ascension, Action Strategy, and Battle
 - Active Effects and Passive Action triggers
 - Reconnection, surrender, and match results
@@ -42,11 +42,15 @@ Actions are classified independently:
 ```text
 actionSource:
 - BASIC
-- SECT
+- SECT_TECHNIQUE
 
 activationType:
 - ACTIVE
 - PASSIVE
+
+resolutionType for Active Actions:
+- RESOLVE_ON_COMPLETION
+- ACTIVE_DURING_EXECUTION
 ```
 
 An Action may additionally have:
@@ -93,10 +97,11 @@ Each Sect owns a configured set of Actions, normally around five.
 
 Each player selects:
 
-1. One Main Sect.
-2. Three distinct Actions belonging to the Main Sect.
-3. One Support Sect.
-4. One Action belonging to the Support Sect.
+1. Two distinct Basic Actions from `SLASH`, `DEFEND`, and `SHIELD`.
+2. One Main Sect.
+3. Three distinct Actions belonging to the Main Sect.
+4. One Support Sect.
+5. One Action belonging to the Support Sect.
 
 The Support Sect may be the same as the Main Sect. The Support Action:
 
@@ -104,17 +109,18 @@ The Support Sect may be the same as the Main Sect. The Support Action:
 - Must not be an Ultimate.
 - May be active or passive.
 
-After selection, each player has exactly five Action slots:
+After selection, each player has exactly six Action slots:
 
 ```text
-BASIC
+BASIC_1
+BASIC_2
 MAIN_1
 MAIN_2
 MAIN_3
 SUPPORT
 ```
 
-The Basic Action starts at level 1. Other Actions use:
+Both selected Basic Actions start at level 1. Other Actions use:
 
 ```text
 currentLevel = 0  -> locked
@@ -123,20 +129,24 @@ currentLevel >= 1 -> unlocked
 
 ### 3.2 Action Queue
 
-Only unlocked Actions with `activationType = ACTIVE` may be placed in the Action Queue.
+Only unlocked Actions with `activationType = ACTIVE` are valid executable queue occurrences. Queue confirmation does not validate or reject a submitted queue; invalid occurrences become `EMPTY_SLOT` at runtime.
 
 An active Action slot may appear multiple times in the same queue. Passive Actions cannot be queued. They activate automatically when their configured gameplay-event conditions are satisfied.
 
-Required queue size:
+Queue duration limit:
 
-| Round | Size |
-|---:|---:|
-| 1 | 2 |
-| 2 | 3 |
-| 3 | 4 |
-| 4 | 5 |
-| 5 | 6 |
-| 6+ | 7 |
+| Round | Duration | Ticks |
+|---:|---:|---:|
+| 1 | 2 seconds | 20 |
+| 2 | 3 seconds | 30 |
+| 3 | 4 seconds | 40 |
+| 4 | 5 seconds | 50 |
+| 5 | 6 seconds | 60 |
+| 6+ | 7 seconds | 70 |
+
+One tick is `0.1` second. Actions occupy `(startTick, endTick]`, and AS does not modify any Action's duration. Only Slash cooldown is divided by `AS` and rounded down to whole ticks. Defend, Shield, and every Sect Technique keep their configured cooldown.
+
+Before confirming, the client may request an advisory queue check. It reports duration, cooldown, stack, transition, ownership, level, and activation-type violations. It never checks resource sufficiency and does not confirm, lock, or block the queue.
 
 After round 1, at most one retained queue occurrence may be removed. Retained occurrences keep their relative order; newly selected Actions may be inserted anywhere.
 
@@ -159,11 +169,11 @@ During Renewal, the server:
 
 ### 3.4 Battle
 
-Both Action Queues resolve simultaneously by zero-based position. One pair of positions is one tick. There is no initiative or alternating turn order.
+Both Action Queues resolve simultaneously on the same 0.1-second timeline. Actions within one player's queue are sequential, but the two players' Action boundaries may differ. There is no initiative or alternating turn order.
 
-If an Action cannot pay its cost or is disabled, only that Action fails. The opposing Action continues to resolve.
+Every occurrence is checked against actual runtime state. If it is invalid, cannot pay its cost, or is disabled, it becomes `EMPTY_SLOT`, produces no Effects, and keeps its scheduled interval so later Actions do not shift. The opposing timeline continues.
 
-Passive Actions may trigger from gameplay events produced during resolution. Passive results are included in `TICK_RESOLVED`; passive Actions are never included as submitted queue entries.
+Passive Actions may trigger from gameplay events produced during resolution. Passive results are included in timeline resolution events; Passive Actions are never valid executable queue entries.
 
 ---
 
@@ -374,8 +384,9 @@ Response `200 OK`:
       "actionKey": "QUICK_SLASH",
       "name": "Quick Slash",
       "description": "A fast sword strike.",
-      "actionSource": "SECT",
+      "actionSource": "SECT_TECHNIQUE",
       "activationType": "ACTIVE",
+      "resolutionType": "RESOLVE_ON_COMPLETION",
       "isUltimate": false,
       "maxLevel": 3
     },
@@ -384,8 +395,9 @@ Response `200 OK`:
       "actionKey": "HEAVENLY_EXECUTION",
       "name": "Heavenly Execution",
       "description": "The Ultimate Action of Heaven Sword.",
-      "actionSource": "SECT",
+      "actionSource": "SECT_TECHNIQUE",
       "activationType": "ACTIVE",
+      "resolutionType": "RESOLVE_ON_COMPLETION",
       "isUltimate": true,
       "maxLevel": 3
     }
@@ -398,7 +410,7 @@ Errors: `SECT_NOT_FOUND`.
 ### 5.3 List Actions
 
 ```http
-GET /api/actions?actionSource=SECT&activationType=PASSIVE&sectId={sectId}
+GET /api/actions?actionSource=SECT_TECHNIQUE&activationType=PASSIVE&sectId={sectId}
 Authorization: Bearer <access-token>
 ```
 
@@ -414,8 +426,9 @@ Response `200 OK`:
       "actionKey": "SWORD_INSTINCT",
       "name": "Sword Instinct",
       "description": "Triggers after three successful hits.",
-      "actionSource": "SECT",
+      "actionSource": "SECT_TECHNIQUE",
       "activationType": "PASSIVE",
+      "resolutionType": null,
       "isUltimate": false,
       "maxLevel": 3,
       "sectIds": ["fdb55783-b0d7-4f74-9ac6-6fb587783ac8"]
@@ -442,17 +455,22 @@ Response `200 OK`:
   "actionKey": "QUICK_SLASH",
   "name": "Quick Slash",
   "description": "A fast sword strike.",
-  "actionSource": "SECT",
+  "actionSource": "SECT_TECHNIQUE",
   "activationType": "ACTIVE",
+  "resolutionType": "RESOLVE_ON_COMPLETION",
   "isUltimate": false,
   "sectIds": ["fdb55783-b0d7-4f74-9ac6-6fb587783ac8"],
   "levels": [
     {
       "level": 1,
       "learningPointCost": 1,
+      "baseDurationTicks": 10,
+      "baseCooldownTicks": 5,
+      "maxConsecutiveStacks": 1,
       "costs": [
         {
           "resourceType": "MP",
+          "paymentTiming": "ON_EXECUTION_START",
           "calculationType": "FLAT",
           "value": 8
         }
@@ -546,7 +564,7 @@ Response `200 OK`:
   "status": "IN_PROGRESS",
   "phase": "ACTION_STRATEGY",
   "roundNumber": 2,
-  "tickIndex": 0,
+  "currentTimelineTick": 0,
   "phaseStartedAt": 1783770000000,
   "phaseDeadlineAt": 1783770030000,
   "players": [
@@ -558,6 +576,7 @@ Response `200 OK`:
       "mainSectId": "fdb55783-b0d7-4f74-9ac6-6fb587783ac8",
       "supportSectId": "0bdca6ea-dd91-40e9-bd81-c7fc0ba15875",
       "state": {
+        "statLevels": { "str": 1, "hp": 1, "def": 1, "as": 1 },
         "str": 10,
         "def": 5,
         "as": 5,
@@ -568,8 +587,16 @@ Response `200 OK`:
       "actionSlots": [
         {
           "actionSlotId": "863cda43-a4bf-4fd9-858a-715cc46fe982",
-          "slotType": "BASIC",
+          "slotType": "BASIC_1",
           "actionId": "737cb9aa-f0c8-4180-a9c8-a94fe9e0de7d",
+          "activationType": "ACTIVE",
+          "isUltimate": false,
+          "currentLevel": 1
+        },
+        {
+          "actionSlotId": "9f9ab91b-f8ad-4c8a-8e68-f842d117ac51",
+          "slotType": "BASIC_2",
+          "actionId": "ca9890b7-10b4-483f-b62c-26e91f053fad",
           "activationType": "ACTIVE",
           "isUltimate": false,
           "currentLevel": 1
@@ -687,9 +714,11 @@ Access-token expiry does not terminate an established connection. Explicit logou
 | Send | `/app/rooms/{roomId}/kick` | Host removes Player B. |
 | Send | `/app/rooms/{roomId}/start` | Start the match. |
 | Send | `/app/rooms/{roomId}/request-snapshot` | Request private room snapshot. |
+| Send | `/app/matches/{matchId}/confirm-basic-loadout` | Confirm two of the three Basic Actions. |
 | Send | `/app/matches/{matchId}/confirm-main-loadout` | Confirm Main Sect and three Main Actions. |
 | Send | `/app/matches/{matchId}/confirm-support-loadout` | Confirm Support Sect and Support Action. |
 | Send | `/app/matches/{matchId}/confirm-ascension` | Confirm Ascension allocation. |
+| Send | `/app/matches/{matchId}/check-action-queue` | Preview Action Queue validity without confirming. |
 | Send | `/app/matches/{matchId}/confirm-action-queue` | Confirm Action Queue. |
 | Send | `/app/matches/{matchId}/surrender` | Surrender. |
 | Send | `/app/matches/{matchId}/request-snapshot` | Request private match snapshot. |
@@ -712,7 +741,7 @@ Access-token expiry does not terminate an established connection. Explicit logou
 ```json
 {
   "eventId": "189a4f5c-65b6-4e84-87eb-380252f0dca9",
-  "type": "TICK_RESOLVED",
+  "type": "TIMELINE_POINT_RESOLVED",
   "matchId": "8262bd3a-8ad5-41b6-baf1-5e356b0ef937",
   "serverTime": 1783770001500,
   "correlationId": "77e99328-7e61-4e84-aa93-73f9a8379451",
@@ -807,7 +836,7 @@ Success event:
   "roomId": "14dcc51b-a34e-4ad8-96da-e0a22f3f3503",
   "matchId": "8262bd3a-8ad5-41b6-baf1-5e356b0ef937",
   "payload": {
-    "phase": "PRE_MATCH_MAIN_SECT_SELECTION"
+    "phase": "PRE_MATCH_BASIC_SELECTION"
   }
 }
 ```
@@ -818,7 +847,37 @@ Errors: `NOT_ROOM_HOST`, `PLAYERS_NOT_READY`, `PLAYER_DISCONNECTED`.
 
 ## 10. Pre-Match Selection
 
-### 10.1 Confirm Main loadout
+### 10.1 Confirm Basic loadout
+
+Destination:
+
+```text
+/app/matches/{matchId}/confirm-basic-loadout
+```
+
+Payload:
+
+```json
+{
+  "basicActionIds": [
+    "737cb9aa-f0c8-4180-a9c8-a94fe9e0de7d",
+    "ca9890b7-10b4-483f-b62c-26e91f053fad"
+  ]
+}
+```
+
+Validation:
+
+- Phase is `PRE_MATCH_BASIC_SELECTION`.
+- Exactly two distinct Actions are supplied.
+- Both use `actionSource = BASIC`.
+- Their `actionKey` values are selected from `SLASH`, `DEFEND`, and `SHIELD`.
+
+After both players confirm, `BASIC_LOADOUT_RESOLVED` reveals both selections, creates `BASIC_1` and `BASIC_2` at level 1, and advances to `PRE_MATCH_MAIN_SECT_SELECTION`.
+
+Errors: `BASIC_ACTION_COUNT_INVALID`, `BASIC_ACTION_INVALID`, `DUPLICATE_ACTION`, `INVALID_MATCH_PHASE`.
+
+### 10.2 Confirm Main loadout
 
 Destination:
 
@@ -867,7 +926,7 @@ After both confirm, `MAIN_LOADOUT_RESOLVED` reveals both Main Sects and Main Act
 
 Errors: `SECT_NOT_FOUND`, `ACTION_NOT_FOUND`, `ACTION_NOT_IN_SECT`, `MAIN_ACTION_COUNT_INVALID`, `DUPLICATE_ACTION`, `INVALID_MATCH_PHASE`.
 
-### 10.2 Confirm Support loadout
+### 10.3 Confirm Support loadout
 
 Destination:
 
@@ -893,7 +952,7 @@ Validation:
 - Support Action has `isUltimate = false`.
 - Active or passive Support Actions are allowed.
 
-After both confirm, `SUPPORT_LOADOUT_RESOLVED` includes both complete five-slot loadouts:
+After both confirm, `SUPPORT_LOADOUT_RESOLVED` includes both complete six-slot loadouts:
 
 ```json
 {
@@ -910,8 +969,16 @@ After both confirm, `SUPPORT_LOADOUT_RESOLVED` includes both complete five-slot 
         "actionSlots": [
           {
             "actionSlotId": "863cda43-a4bf-4fd9-858a-715cc46fe982",
-            "slotType": "BASIC",
+            "slotType": "BASIC_1",
             "actionId": "737cb9aa-f0c8-4180-a9c8-a94fe9e0de7d",
+            "activationType": "ACTIVE",
+            "isUltimate": false,
+            "currentLevel": 1
+          },
+          {
+            "actionSlotId": "9f9ab91b-f8ad-4c8a-8e68-f842d117ac51",
+            "slotType": "BASIC_2",
+            "actionId": "ca9890b7-10b4-483f-b62c-26e91f053fad",
             "activationType": "ACTIVE",
             "isUltimate": false,
             "currentLevel": 1
@@ -950,6 +1017,7 @@ After both confirm, `SUPPORT_LOADOUT_RESOLVED` includes both complete five-slot 
           }
         ],
         "state": {
+          "statLevels": { "str": 1, "hp": 1, "def": 1, "as": 1 },
           "str": 10,
           "def": 5,
           "as": 5,
@@ -971,7 +1039,8 @@ Errors: `SUPPORT_ACTION_INVALID`, `SUPPORT_ACTION_DUPLICATES_MAIN`, `ULTIMATE_NO
 
 ```mermaid
 stateDiagram-v2
-  [*] --> PRE_MATCH_MAIN_SECT_SELECTION
+  [*] --> PRE_MATCH_BASIC_SELECTION
+  PRE_MATCH_BASIC_SELECTION --> PRE_MATCH_MAIN_SECT_SELECTION
   PRE_MATCH_MAIN_SECT_SELECTION --> PRE_MATCH_SUPPORT_SELECTION
   PRE_MATCH_SUPPORT_SELECTION --> RENEWAL
   RENEWAL --> ASCENSION
@@ -1057,6 +1126,8 @@ Payload:
 Rules:
 
 - Total allocation is between 0 and 2 LP.
+- Stat targets are limited to `HP`, `STR`, `DEF`, and `AS`.
+- Stats and Actions have a maximum level of 3.
 - Level `0 -> 1` learns the Action.
 - Level `1+` upgrades the Action.
 - Unspent LP is forfeited.
@@ -1066,7 +1137,68 @@ At timeout, an unconfirmed player receives an empty allocation. After both confi
 
 Errors: `LEARNING_POINTS_EXCEEDED`, `INVALID_ASCENSION_TARGET`, `ACTION_LEVEL_MAX`, `ALREADY_CONFIRMED`.
 
-### 11.3 Confirm Action Queue
+### 11.3 Check Action Queue
+
+Destination:
+
+```text
+/app/matches/{matchId}/check-action-queue
+```
+
+Payload:
+
+```json
+{
+  "actionSlotIds": [
+    "863cda43-a4bf-4fd9-858a-715cc46fe982",
+    "18a9a33b-ff9a-4519-8fbc-04f70c522c79",
+    "863cda43-a4bf-4fd9-858a-715cc46fe982"
+  ]
+}
+```
+
+Private response:
+
+```json
+{
+  "type": "ACTION_QUEUE_CHECKED",
+  "matchId": "8262bd3a-8ad5-41f8-b6af-918737abe778",
+  "payload": {
+    "valid": false,
+    "durationLimitTicks": 30,
+    "totalDurationTicks": 34,
+    "occurrences": [
+      {
+        "sequenceIndex": 0,
+        "actionSlotId": "863cda43-a4bf-4fd9-858a-715cc46fe982",
+        "startTick": 0,
+        "endTick": 10,
+        "effectiveDurationTicks": 10,
+        "effectiveCooldownTicks": 1
+      }
+    ],
+    "violations": [
+      {
+        "code": "DURATION_LIMIT_EXCEEDED",
+        "sequenceIndex": 2,
+        "details": { "durationLimitTicks": 30, "endTick": 34 }
+      }
+    ]
+  }
+}
+```
+
+The check is advisory. It does not persist, confirm, lock, reject, or alter the queue. It reports every detectable non-resource violation, including `DURATION_LIMIT_EXCEEDED`, `COUNTDOWN_INVALID`, `ACTION_NOT_OWNED`, `ACTION_LOCKED`, `ACTION_NOT_QUEUEABLE`, and `QUEUE_TRANSITION_INVALID`. It never checks MP, QP, HP, or any other Action cost.
+
+AS does not modify Action duration. Only Slash uses AS-adjusted cooldown:
+
+```text
+effectiveCooldownTicks = max(0, floor(baseCooldownTicks / AS))
+```
+
+Defend, Shield, and Sect Technique cooldowns use `baseCooldownTicks` unchanged. Every Action duration uses `baseDurationTicks` unchanged.
+
+### 11.4 Confirm Action Queue
 
 Destination:
 
@@ -1088,116 +1220,103 @@ Payload:
 
 Rules:
 
-- The list length may be between 0 and the required queue size.
-- Every supplied slot belongs to the caller.
-- Every supplied Action is unlocked and active.
+- The server stores the submitted sequence without running queue validation.
+- Invalid ownership, level, activation type, duration, cooldown, stack, transition, or resource state does not block confirmation.
 - The same slot may appear multiple times.
-- Previous-queue removal and retained-order rules are enforced.
 - Submitting confirms the queue and prevents further edits.
-- Missing positions become explicit `EMPTY_TIMEOUT` entries when the phase resolves.
+- At timeout, an unconfirmed player receives an empty queue.
+- Every occurrence is checked at runtime. An invalid occurrence becomes `EMPTY_SLOT`, pays no costs, produces no Effects, and retains its scheduled interval.
 
 After both confirmations or timeout, `BATTLE_STARTED` is emitted. The opponent's complete queue remains hidden.
 
-Errors: `ACTION_QUEUE_TOO_LARGE`, `ACTION_NOT_OWNED`, `ACTION_LOCKED`, `ACTION_NOT_QUEUEABLE`, `ACTION_REMOVAL_LIMIT_REACHED`, `ACTION_ORDER_INVALID`, `ALREADY_CONFIRMED`.
+Errors are limited to command-level failures such as `INVALID_MATCH_PHASE`, `MALFORMED_PAYLOAD`, and `ALREADY_CONFIRMED`. Queue gameplay violations are advisory check results or runtime `EMPTY_SLOT` reasons, not confirmation rejections.
 
 ---
 
 ## 12. Battle Events
 
-### 12.1 Tick revealed
+### 12.1 Action started
+
+`ACTION_STARTED` reveals an occurrence when its `(startTick, endTick]` interval begins:
 
 ```json
 {
-  "type": "TICK_REVEALED",
+  "type": "ACTION_STARTED",
   "matchId": "8262bd3a-8ad5-41b6-baf1-5e356b0ef937",
   "payload": {
     "roundNumber": 2,
-    "tickIndex": 0,
-    "actions": [
-      {
-        "playerId": "5ab5cf4a-dc55-4130-b8e2-5b7751b091e0",
-        "actionSlotId": "18a9a33b-ff9a-4519-8fbc-04f70c522c79",
-        "actionId": "22172357-3371-4aa7-8641-d44b9405db98"
-      },
-      {
-        "playerId": "37f622bf-7200-4cdc-b8bf-918737abe778",
-        "actionSlotId": null,
-        "actionId": null
-      }
-    ],
-    "revealedAt": 1783770000000,
-    "resolveAt": 1783770001500
+    "timelineTick": 0,
+    "playerId": "5ab5cf4a-dc55-4130-b8e2-5b7751b091e0",
+    "sequenceIndex": 0,
+    "actionSlotId": "863cda43-a4bf-4fd9-858a-715cc46fe982",
+    "actionId": "737cb9aa-f0c8-4180-a9c8-a94fe9e0de7d",
+    "actionKey": "SLASH",
+    "resolutionType": "RESOLVE_ON_COMPLETION",
+    "startTick": 0,
+    "endTick": 10,
+    "effectiveDurationTicks": 10,
+    "effectiveCooldownTicks": 1
   }
 }
 ```
 
-### 12.2 Tick resolved
+Action duration is never AS-adjusted. For Slash, `effectiveCooldownTicks` includes AS adjustment; other Actions use their configured cooldown unchanged. `ACTIVE_DURING_EXECUTION` Effects remain active for the complete `(startTick, endTick]` interval.
+
+### 12.2 Timeline point resolved
+
+`TIMELINE_POINT_RESOLVED` contains every completion, runtime-empty occurrence, Effect expiration, charge consumption, passive trigger, and state change resolved at one timeline point:
 
 ```json
 {
-  "type": "TICK_RESOLVED",
+  "type": "TIMELINE_POINT_RESOLVED",
   "matchId": "8262bd3a-8ad5-41b6-baf1-5e356b0ef937",
   "payload": {
     "roundNumber": 2,
-    "tickIndex": 0,
+    "timelineTick": 10,
     "outcomes": [
       {
         "playerId": "5ab5cf4a-dc55-4130-b8e2-5b7751b091e0",
-        "actionId": "22172357-3371-4aa7-8641-d44b9405db98",
+        "sequenceIndex": 0,
+        "actionId": "737cb9aa-f0c8-4180-a9c8-a94fe9e0de7d",
         "status": "SUCCESS",
         "failureReason": null,
         "effects": [
           {
-            "effectKey": "QUICK_SLASH_DAMAGE",
+            "effectKey": "SLASH_DAMAGE",
             "sourcePlayerId": "5ab5cf4a-dc55-4130-b8e2-5b7751b091e0",
             "targetPlayerId": "37f622bf-7200-4cdc-b8bf-918737abe778",
             "changes": [
-              {
-                "attribute": "HP",
-                "before": 100,
-                "change": -18,
-                "after": 82
-              }
+              { "attribute": "HP", "before": 100, "change": -2, "after": 98 }
             ]
           }
         ]
-      },
-      {
-        "playerId": "37f622bf-7200-4cdc-b8bf-918737abe778",
-        "actionId": null,
-        "status": "FAILED",
-        "failureReason": "EMPTY_SLOT",
-        "effects": []
       }
     ],
-    "passiveTriggers": [
-      {
-        "ownerPlayerId": "5ab5cf4a-dc55-4130-b8e2-5b7751b091e0",
-        "actionId": "0c949f1c-5731-45f8-a7ec-e6a2618dd80e",
-        "actionKey": "SWORD_INSTINCT",
-        "triggerEvent": "ACTION_HIT",
-        "effects": []
-      }
-    ],
+    "passiveTriggers": [],
     "players": [],
     "matchResult": null
   }
 }
 ```
 
-`failureReason` values:
+Runtime-invalid occurrences use `status = EMPTY_SLOT` and one of these `failureReason` values:
 
 ```text
+DURATION_LIMIT_EXCEEDED
+COUNTDOWN_INVALID
 INSUFFICIENT_RESOURCE
+ACTION_NOT_OWNED
+ACTION_LOCKED
+ACTION_NOT_QUEUEABLE
 DISABLED_BY_EFFECT
-EMPTY_SLOT
+QUEUE_TRANSITION_INVALID
 ```
 
-The server limits passive trigger depth and events per tick. A passive-trigger loop is rejected internally and reported using `INTERNAL_GAMEPLAY_ERROR`; partial client-calculated recovery is never allowed.
+An empty occurrence retains its scheduled interval, pays no cost, and produces no Effects. The server limits passive trigger depth and events per timeline point to prevent loops.
 
 ### 12.3 Round and match completion
 
-If no terminal condition exists after all ticks, the server emits `ROUND_ENDED` and starts the next Renewal.
+If no terminal condition exists after both timelines complete, the server emits `ROUND_ENDED` and starts the next Renewal.
 
 Match result reasons:
 
@@ -1279,9 +1398,12 @@ Surrender is valid in every match phase except `GAME_OVER`. It immediately creat
 | `MATCH_NOT_FOUND` | Match does not exist. |
 | `PLAYER_NOT_IN_MATCH` | Caller is not a match player. |
 | `INVALID_MATCH_PHASE` | Command is not valid in the current phase. |
+| `MALFORMED_PAYLOAD` | Command payload does not match its typed DTO. |
 | `SECT_NOT_FOUND` | Sect does not exist. |
 | `ACTION_NOT_FOUND` | Action does not exist. |
 | `ACTION_NOT_IN_SECT` | Action does not belong to the selected Sect. |
+| `BASIC_ACTION_COUNT_INVALID` | Basic loadout does not contain exactly two Actions. |
+| `BASIC_ACTION_INVALID` | Basic selection contains an Action outside Slash, Defend, and Shield. |
 | `MAIN_ACTION_COUNT_INVALID` | Main loadout does not contain exactly three Actions. |
 | `DUPLICATE_ACTION` | A loadout contains the same Action more than once. |
 | `SUPPORT_ACTION_INVALID` | Support Action is not eligible. |
@@ -1290,12 +1412,14 @@ Surrender is valid in every match phase except `GAME_OVER`. It immediately creat
 | `LEARNING_POINTS_EXCEEDED` | Ascension allocation exceeds 2 LP. |
 | `INVALID_ASCENSION_TARGET` | Ascension target is invalid or ineligible. |
 | `ACTION_LEVEL_MAX` | Action cannot be upgraded further. |
-| `ACTION_QUEUE_TOO_LARGE` | Queue exceeds the required size. |
-| `ACTION_NOT_OWNED` | Action slot does not belong to the caller. |
-| `ACTION_LOCKED` | Action has level 0. |
-| `ACTION_NOT_QUEUEABLE` | Passive Action was submitted to the queue. |
-| `ACTION_REMOVAL_LIMIT_REACHED` | More than one retained occurrence was removed. |
-| `ACTION_ORDER_INVALID` | Relative order of retained entries changed. |
+| `STAT_LEVEL_MAX` | Upgradeable Stat is already level 3. |
+| `DURATION_LIMIT_EXCEEDED` | Advisory/runtime result: an occurrence extends beyond the round duration limit. |
+| `COUNTDOWN_INVALID` | Advisory/runtime result: cooldown or consecutive-stack timing is invalid. |
+| `INSUFFICIENT_RESOURCE` | Runtime result: actual resources cannot pay the Action cost. This is never returned by queue preview validation. |
+| `ACTION_NOT_OWNED` | Advisory/runtime result: Action slot does not belong to the caller. |
+| `ACTION_LOCKED` | Advisory/runtime result: Action has level 0. |
+| `ACTION_NOT_QUEUEABLE` | Advisory/runtime result: submitted Action is not Active. |
+| `QUEUE_TRANSITION_INVALID` | Advisory/runtime result: previous-queue removal or retained-order rule is violated. |
 | `ALREADY_CONFIRMED` | Player already confirmed the phase. |
 | `MATCH_NOT_FINISHED` | Match result is not available. |
 | `INTERNAL_GAMEPLAY_ERROR` | Authoritative engine could not safely resolve gameplay. |
@@ -1308,11 +1432,9 @@ Private STOMP rejection:
   "matchId": "8262bd3a-8ad5-41b6-baf1-5e356b0ef937",
   "correlationId": "77e99328-7e61-4e84-aa93-73f9a8379451",
   "payload": {
-    "code": "ACTION_NOT_QUEUEABLE",
-    "message": "Passive Actions cannot be added to the Action Queue.",
-    "details": {
-      "actionSlotId": "18a9a33b-ff9a-4519-8fbc-04f70c522c79"
-    }
+    "code": "INVALID_MATCH_PHASE",
+    "message": "The command is not valid in the current match phase.",
+    "details": {}
   }
 }
 ```
@@ -1322,11 +1444,13 @@ Private STOMP rejection:
 ## 15. TypeScript DTO Reference
 
 ```ts
-export type ActionSource = 'BASIC' | 'SECT';
+export type ActionSource = 'BASIC' | 'SECT_TECHNIQUE';
 export type ActivationType = 'ACTIVE' | 'PASSIVE';
-export type ActionSlotType = 'BASIC' | 'MAIN_1' | 'MAIN_2' | 'MAIN_3' | 'SUPPORT';
+export type ResolutionType = 'RESOLVE_ON_COMPLETION' | 'ACTIVE_DURING_EXECUTION';
+export type ActionSlotType = 'BASIC_1' | 'BASIC_2' | 'MAIN_1' | 'MAIN_2' | 'MAIN_3' | 'SUPPORT';
 
 export type MatchPhase =
+  | 'PRE_MATCH_BASIC_SELECTION'
   | 'PRE_MATCH_MAIN_SECT_SELECTION'
   | 'PRE_MATCH_SUPPORT_SELECTION'
   | 'RENEWAL'
@@ -1341,6 +1465,7 @@ export interface CappedValue {
 }
 
 export interface PlayerState {
+  statLevels: { str: number; hp: number; def: number; as: number };
   str: number;
   def: number;
   as: number;
@@ -1356,8 +1481,17 @@ export interface ActionSummary {
   description: string | null;
   actionSource: ActionSource;
   activationType: ActivationType;
+  resolutionType: ResolutionType | null;
   isUltimate: boolean;
   maxLevel: number;
+}
+
+export interface ActionLevelDefinition {
+  level: 1 | 2 | 3;
+  learningPointCost: number;
+  baseDurationTicks: number | null;
+  baseCooldownTicks: number | null;
+  maxConsecutiveStacks: number | null;
 }
 
 export interface MatchActionSlot {
@@ -1367,6 +1501,10 @@ export interface MatchActionSlot {
   activationType: ActivationType;
   isUltimate: boolean;
   currentLevel: number;
+}
+
+export interface ConfirmBasicLoadoutPayload {
+  basicActionIds: [string, string];
 }
 
 export interface ConfirmMainLoadoutPayload {
@@ -1381,6 +1519,29 @@ export interface ConfirmSupportLoadoutPayload {
 
 export interface ConfirmActionQueuePayload {
   actionSlotIds: string[];
+}
+
+export type CheckActionQueuePayload = ConfirmActionQueuePayload;
+
+export type QueueViolationCode =
+  | 'DURATION_LIMIT_EXCEEDED'
+  | 'COUNTDOWN_INVALID'
+  | 'ACTION_NOT_OWNED'
+  | 'ACTION_LOCKED'
+  | 'ACTION_NOT_QUEUEABLE'
+  | 'QUEUE_TRANSITION_INVALID';
+
+export interface QueueViolation {
+  code: QueueViolationCode;
+  sequenceIndex: number | null;
+  details: Record<string, unknown>;
+}
+
+export interface ActionQueueCheckResult {
+  valid: boolean;
+  durationLimitTicks: number;
+  totalDurationTicks: number;
+  violations: QueueViolation[];
 }
 
 export interface ClientCommand<TPayload> {
@@ -1407,16 +1568,24 @@ export interface ServerEvent<TPayload> {
 
 ```java
 public enum ActionSource {
-    BASIC, SECT
+    BASIC, SECT_TECHNIQUE
 }
 
 public enum ActivationType {
     ACTIVE, PASSIVE
 }
 
-public enum ActionSlotType {
-    BASIC, MAIN_1, MAIN_2, MAIN_3, SUPPORT
+public enum ResolutionType {
+    RESOLVE_ON_COMPLETION, ACTIVE_DURING_EXECUTION
 }
+
+public enum ActionSlotType {
+    BASIC_1, BASIC_2, MAIN_1, MAIN_2, MAIN_3, SUPPORT
+}
+
+public record ConfirmBasicLoadoutPayload(
+    List<UUID> basicActionIds
+) {}
 
 public record ConfirmMainLoadoutPayload(
     UUID mainSectId,
@@ -1430,6 +1599,32 @@ public record ConfirmSupportLoadoutPayload(
 
 public record ConfirmActionQueuePayload(
     List<UUID> actionSlotIds
+) {}
+
+public record CheckActionQueuePayload(
+    List<UUID> actionSlotIds
+) {}
+
+public enum QueueViolationCode {
+    DURATION_LIMIT_EXCEEDED,
+    COUNTDOWN_INVALID,
+    ACTION_NOT_OWNED,
+    ACTION_LOCKED,
+    ACTION_NOT_QUEUEABLE,
+    QUEUE_TRANSITION_INVALID
+}
+
+public record QueueViolation(
+    QueueViolationCode code,
+    Integer sequenceIndex,
+    Map<String, Object> details
+) {}
+
+public record ActionQueueCheckResult(
+    boolean valid,
+    int durationLimitTicks,
+    int totalDurationTicks,
+    List<QueueViolation> violations
 ) {}
 
 public record ClientCommand<T>(
@@ -1458,12 +1653,12 @@ Java validation must use typed DTOs and enums. WebSocket handlers obtain the aut
 
 - Derive identity exclusively from JWT, active server session, and Spring `Principal`.
 - Authorize every room and match read, subscription, and command against membership.
-- Do not reveal secret Main selections, Support selections, Ascension allocations, or queues before their reveal point.
+- Do not reveal secret Basic, Main, or Support selections, Ascension allocations, or queues before their reveal point.
 - Do not expose `behavior_handler`, Effect component config, formulas, or server-only trigger filters.
 - Treat every client stat, cost, target, damage, Effect, and result value as untrusted.
-- Validate Action ownership, current level, activation type, Sect membership, Support duplication, and Ultimate restrictions server-side.
+- Enforce loadout membership, Support duplication, and Ultimate restrictions server-side. Queue checks are advisory; queue occurrences are authoritatively checked against ownership, current level, activation type, timing, cooldown, stack, and resources at runtime.
 - Process each gameplay command transactionally.
 - On reconnect, subscribe before requesting a snapshot.
 - Do not replay confirmation commands automatically after reconnect.
-- Do not persist or expose a complete Battle replay. The frontend may render a lightweight Battle Log from live `TICK_RESOLVED` events.
+- Do not persist or expose a complete Battle replay. The frontend may render a lightweight Battle Log from live `ACTION_STARTED` and `TIMELINE_POINT_RESOLVED` events.
 - Static Action and Effect definitions are immutable while matches are active. End or cancel active matches before applying static game-data changes.

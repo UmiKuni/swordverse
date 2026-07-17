@@ -80,6 +80,7 @@ The game uses the term **Sect** to represent a player’s martial school, factio
 Each player selects:
 
 ```text
+- Two distinct Basic Actions from Slash, Defend, and Shield
 - One Main Sect
 - One Support Sect
 - One Support Action from the Support Sect
@@ -96,25 +97,26 @@ The schema uses a single `actions` table for all cards and player abilities. An 
 This includes:
 
 ```text
-- Basic cards
+- Basic Actions (`SLASH`, `DEFEND`, and `SHIELD`)
 - Active Sect cards
 - Passive Sect cards
 - Ultimate cards
 ```
 
-A player holds exactly five Action slots during a match:
+A player holds exactly six Action slots during a match:
 
 ```text
-- BASIC
+- BASIC_1
+- BASIC_2
 - MAIN_1
 - MAIN_2
 - MAIN_3
 - SUPPORT
 ```
 
-The three Main slots are selected from the Main Sect. The Support slot is selected from the Support Sect, may not duplicate a Main slot, and may not contain an Ultimate Action. The Support Sect may be the same as the Main Sect.
+The two Basic slots contain two distinct Actions selected from Slash, Defend, and Shield. The three Main slots are selected from the Main Sect. The Support slot is selected from the Support Sect, may not duplicate a Main slot, and may not contain an Ultimate Action. The Support Sect may be the same as the Main Sect.
 
-Only Actions with `activation_type = 'ACTIVE'` may be placed in the Action Queue. The same active Action slot may be queued multiple times. Passive Actions remain in the player's hand and are activated by server-observed gameplay events.
+Only Actions with `activation_type = 'ACTIVE'` are valid executable Action Queue occurrences. Confirmation does not reject invalid submissions; runtime converts invalid occurrences to empty slots. The same active Action slot may be submitted multiple times subject to its stack and cooldown rules. Passive Actions remain in the player's hand and are activated by server-observed gameplay events.
 
 Action availability is represented by level:
 
@@ -123,7 +125,7 @@ current_level = 0  -> locked
 current_level >= 1 -> unlocked
 ```
 
-Basic Actions start at level 1.
+Selected Basic Actions start at level 1. Actions and upgradeable Stats have a maximum level of 3. Ascension may upgrade Actions and only the `HP`, `STR`, `DEF`, and `AS` Stats.
 
 ---
 
@@ -557,13 +559,14 @@ CHECK (mp_to_qp_ratio >= 0)
 
 The `actions` table stores all Actions available in the game.
 
-An Action is any selectable or triggerable game ability. This includes Basic Actions, Active Techniques, and Passive Techniques.
+An Action is any selectable or triggerable game ability. This includes the three Basic Actions and active or passive Sect Techniques.
 
 Examples:
 
 ```text
-- Basic Strike
-- Guard
+- Slash
+- Defend
+- Shield
 - Quick Slash
 - Heaven Guard
 - Blood Detonation
@@ -580,6 +583,7 @@ The game uses one unified `actions` table instead of separate `basic_actions` an
 | `action_key` | `varchar(100)` | Unique | No | Stable application identifier, such as `HEAVENLY_EXECUTION`. |
 | `action_source` | `varchar(20)` |  | No | Source category of the card. |
 | `activation_type` | `varchar(20)` |  | No | Defines whether the card is actively queued or passively triggered. |
+| `resolution_type` | `varchar(40)` |  | Yes | Active Action timing model: resolve at completion or remain active during execution. Null for Passive Actions. |
 | `is_ultimate` | `boolean` |  | No | Indicates whether this Sect card is an Ultimate Action. |
 | `name` | `varchar(100)` |  | No | Display name of the Action. |
 | `description` | `text` |  | Yes | Description shown to the player. |
@@ -600,7 +604,7 @@ UNIQUE (action_key)
 ```
 
 ```sql
-CHECK (action_source IN ('BASIC', 'SECT'))
+CHECK (action_source IN ('BASIC', 'SECT_TECHNIQUE'))
 ```
 
 ```sql
@@ -608,7 +612,15 @@ CHECK (activation_type IN ('ACTIVE', 'PASSIVE'))
 ```
 
 ```sql
-CHECK (is_ultimate = false OR action_source = 'SECT')
+CHECK (
+  (activation_type = 'ACTIVE' AND resolution_type IN ('RESOLVE_ON_COMPLETION', 'ACTIVE_DURING_EXECUTION'))
+  OR
+  (activation_type = 'PASSIVE' AND resolution_type IS NULL)
+)
+```
+
+```sql
+CHECK (is_ultimate = false OR action_source = 'SECT_TECHNIQUE')
 ```
 
 #### Relationships
@@ -621,9 +633,11 @@ CHECK (is_ultimate = false OR action_source = 'SECT')
 
 #### Notes
 
-- `action_source` and `activation_type` are independent classifications. An Ultimate may be active or passive.
+- `action_source`, `activation_type`, and `resolution_type` are separate classifications. An Ultimate may be active or passive.
 - Only `ACTIVE` Actions may be added to the Action Queue.
 - `PASSIVE` Actions are evaluated from gameplay events and cannot be queued.
+- The three Basic Action records use stable keys `SLASH`, `DEFEND`, and `SHIELD`. They are not connected to Sects.
+- Slash normally uses `RESOLVE_ON_COMPLETION`; Defend normally uses `ACTIVE_DURING_EXECUTION`; Shield may resolve on completion and create a finite, charge-based Shield Effect.
 - `action_key` is stable across environments and maps cleanly to Java constants, logs, fixtures, and frontend assets.
 - `behavior_handler` must map to a Java enum and registered Spring handler. A database value must never contain a Java class name or executable script.
 - Standard Actions should use data-driven triggers and Effect components. `behavior_handler` is reserved for exceptional mechanics.
@@ -699,7 +713,7 @@ ON sect_actions(action_id);
 - A Support Action must not duplicate a selected Main Action and must have `actions.is_ultimate = false`.
 - Main and Support selections may contain active or passive Actions.
 - These cross-table selection rules are validated transactionally by the Spring Boot service layer.
-- Basic Actions do not need to be connected to Sects unless a Basic Action should be restricted to specific Sects in the future.
+- Basic Actions do not need to be connected to Sects. The service layer selects exactly two distinct Basic Actions from `SLASH`, `DEFEND`, and `SHIELD` for each player.
 
 ---
 
@@ -725,8 +739,11 @@ The `action_levels` table only stores actual configured levels, usually level 1 
 |---|---|---:|---:|---|
 | `id` | `uuid` | PK | No | Unique identifier of the Action level record. |
 | `action_id` | `uuid` | FK | No | Action this level belongs to. References `actions.id`. |
-| `level` | `int` |  | No | Level number of the Action. Level 1 or higher. |
+| `level` | `int` |  | No | Level number of the Action, from 1 through 3. |
 | `learning_point_cost` | `int` |  | No | LP cost required to learn or upgrade to this level. |
+| `base_duration_ticks` | `int` |  | Yes | Base execution duration in 0.1-second ticks. Required for Active Actions and null for Passive Actions. |
+| `cooldown_ticks` | `int` |  | Yes | Configured base cooldown after the Action's consecutive stack chain, in 0.1-second ticks. Required for Active Actions. |
+| `max_consecutive_stacks` | `int` |  | Yes | Maximum immediately consecutive uses before cooldown applies. Required for Active Actions. |
 | `created_at` | `timestamptz` |  | No | Timestamp when the Action level record was created. |
 | `updated_at` | `timestamptz` |  | No | Timestamp when the Action level record was last updated. |
 
@@ -749,11 +766,14 @@ UNIQUE (action_id, level)
 ```
 
 ```sql
-CHECK (level >= 1)
+CHECK (level BETWEEN 1 AND 3)
 ```
 
 ```sql
 CHECK (learning_point_cost >= 0)
+CHECK (base_duration_ticks IS NULL OR base_duration_ticks >= 1)
+CHECK (cooldown_ticks IS NULL OR cooldown_ticks >= 0)
+CHECK (max_consecutive_stacks IS NULL OR max_consecutive_stacks >= 1)
 ```
 
 #### Indexes
@@ -776,6 +796,11 @@ ON action_levels(action_id);
 
 - Resource costs are defined in `action_costs`.
 - `learning_point_cost` is used during the Ascension Phase.
+- Active Action levels must define `base_duration_ticks`, `cooldown_ticks`, and `max_consecutive_stacks`; Passive Action levels leave these columns null. This cross-table rule is enforced by the service layer.
+- One tick is exactly 0.1 second.
+- AS does not modify any Action's duration. For Slash only, `effective_cooldown_ticks = max(0, floor(cooldown_ticks / AS))`. Defend, Shield, and Main or Support Sect Technique cooldowns are not modified by `AS`.
+- Cooldown begins at the end of the final occurrence in a gapless stack chain. Each occurrence pays its own configured costs.
+- Dynamic Effects that modify another Action's duration or cooldown are intentionally not supported in the next version; the tick columns leave room for that future extension.
 - If a player has `current_level = 0`, the Action is locked and cannot be used.
 - If a player has `current_level = 1`, the server reads the row where `level = 1`.
 - Passive Techniques may still use `action_levels` if they can be learned or upgraded.
@@ -795,6 +820,7 @@ An Action level may have no cost, one cost, or multiple costs. The game engine v
 | `id` | `uuid` | PK | No | Unique identifier of the Action cost. |
 | `action_level_id` | `uuid` | FK | No | Action level that owns the cost. References `action_levels.id`. |
 | `resource_type` | `varchar(10)` |  | No | Resource consumed by the Action. |
+| `payment_timing` | `varchar(20)` |  | No | Whether the cost is checked and paid at execution start or completion. |
 | `calculation_type` | `varchar(30)` |  | No | Defines how the cost amount is calculated. |
 | `flat_value` | `numeric(10,2)` |  | Yes | Fixed amount used by `FLAT`. |
 | `percent_value` | `numeric(10,4)` |  | Yes | Decimal percentage used by percentage calculations. |
@@ -819,6 +845,10 @@ CHECK (resource_type IN ('HP', 'MP', 'QP'))
 ```
 
 ```sql
+CHECK (payment_timing IN ('ON_EXECUTION_START', 'ON_ACTION_RESOLVE'))
+```
+
+```sql
 CHECK (calculation_type IN ('FLAT', 'PERCENT_CURRENT', 'PERCENT_MAX'))
 ```
 
@@ -840,6 +870,7 @@ CHECK (sequence_order >= 0)
 
 - Java maps `resource_type` and `calculation_type` to enums.
 - Costs are paid atomically. If any required cost cannot be paid, no cost is paid and the Action fails.
+- Runtime validation uses `payment_timing`. Advisory queue validation never evaluates or simulates Action costs.
 - The service layer defines whether HP costs are allowed to reduce HP to zero.
 
 ---
@@ -889,8 +920,8 @@ CHECK (
     'ATTRIBUTE_CHANGED',
     'EFFECT_APPLIED',
     'EFFECT_REMOVED',
-    'BATTLE_TICK_STARTED',
-    'BATTLE_TICK_ENDED',
+    'TIMELINE_TICK_STARTED',
+    'TIMELINE_TICK_ENDED',
     'RENEWAL_STARTED',
     'RENEWAL_ENDED'
   )
@@ -946,7 +977,9 @@ An Action can have multiple Effects through `action_effects`.
 | `name` | `varchar(100)` |  | No | Display or diagnostic name. |
 | `description` | `text` |  | Yes | Player-facing description when the Effect is visible. |
 | `duration_type` | `varchar(20)` |  | No | Lifecycle category of the Effect. |
-| `duration_rounds` | `int` |  | Yes | Number of rounds for a finite Effect. |
+| `duration_ticks` | `int` |  | Yes | Lifetime in 0.1-second Battle ticks for a finite tick-based Effect. |
+| `duration_rounds` | `int` |  | Yes | Lifetime in rounds for a finite round-based Effect. |
+| `max_charges` | `int` |  | Yes | Maximum consumable charges. Null for Effects that are not charge-based. |
 | `period_timing` | `varchar(30)` |  | Yes | Timing at which a periodic Effect executes. |
 | `stacking_policy` | `varchar(30)` |  | No | Rule used when the same Effect is applied again. |
 | `max_stacks` | `int` |  | Yes | Maximum number of stacks allowed. Required when `stacking_policy = 'STACK'`. |
@@ -967,21 +1000,27 @@ UNIQUE (effect_key)
 ```
 
 ```sql
-CHECK (duration_type IN ('INSTANT', 'FINITE', 'INFINITE'))
+CHECK (duration_type IN ('INSTANT', 'FINITE_TICKS', 'FINITE_ROUNDS', 'INFINITE'))
 ```
 
 ```sql
 CHECK (
-  (duration_type = 'FINITE' AND duration_rounds IS NOT NULL AND duration_rounds >= 1)
+  (duration_type = 'FINITE_TICKS' AND duration_ticks IS NOT NULL AND duration_ticks >= 1 AND duration_rounds IS NULL)
   OR
-  (duration_type <> 'FINITE' AND duration_rounds IS NULL)
+  (duration_type = 'FINITE_ROUNDS' AND duration_rounds IS NOT NULL AND duration_rounds >= 1 AND duration_ticks IS NULL)
+  OR
+  (duration_type IN ('INSTANT', 'INFINITE') AND duration_ticks IS NULL AND duration_rounds IS NULL)
 )
+```
+
+```sql
+CHECK (max_charges IS NULL OR max_charges >= 1)
 ```
 
 ```sql
 CHECK (
   period_timing IS NULL
-  OR period_timing IN ('BATTLE_TICK_START', 'BATTLE_TICK_END', 'RENEWAL_START', 'RENEWAL_END')
+  OR period_timing IN ('TIMELINE_TICK_START', 'TIMELINE_TICK_END', 'RENEWAL_START', 'RENEWAL_END')
 )
 ```
 
@@ -1012,6 +1051,7 @@ CHECK (
 
 - Instant Effects execute immediately and do not create `active_effects` rows.
 - Finite and infinite Effects create runtime instances in `active_effects`.
+- A two-second, one-use Shield uses `duration_type = 'FINITE_TICKS'`, `duration_ticks = 20`, and `max_charges = 1`. It expires when its charge is consumed or its lifetime ends.
 - Effect operations belong to `effect_components`; passive activation conditions belong to `action_triggers`.
 - `behavior_handler` must map to a whitelisted Java enum and registered Spring handler.
 - Gameplay logic should remain in the Spring Boot service layer, not in database triggers or stored procedures.
@@ -1051,7 +1091,9 @@ UNIQUE (effect_definition_id, sequence_order)
 ```sql
 CHECK (
   component_type IN (
+    'DEAL_DAMAGE',
     'ATTRIBUTE_MODIFIER',
+    'NEGATE_NEXT_DAMAGE',
     'APPLY_EFFECT',
     'REMOVE_EFFECT',
     'GRANT_TAG',
@@ -1072,7 +1114,9 @@ CHECK (jsonb_typeof(config) = 'object')
 
 | `component_type` | Java configuration DTO | Required configuration |
 |---|---|---|
+| `DEAL_DAMAGE` | `DealDamageConfig` | Damage formula and target rules. |
 | `ATTRIBUTE_MODIFIER` | `AttributeModifierConfig` | Attribute, operation, and magnitude. |
+| `NEGATE_NEXT_DAMAGE` | `NegateNextDamageConfig` | Damage filter and charge-consumption rule. |
 | `APPLY_EFFECT` | `ApplyEffectConfig` | Referenced Effect key and target rules. |
 | `REMOVE_EFFECT` | `RemoveEffectConfig` | Effect key or controlled tag filter. |
 | `GRANT_TAG` | `GrantTagConfig` | Valid gameplay tag. |
@@ -1142,7 +1186,7 @@ UNIQUE (action_level_id, sequence_order)
 ```
 
 ```sql
-CHECK (activation_phase IN ('ON_ACTION_RESOLVE', 'ON_HIT', 'ON_PASSIVE_TRIGGER'))
+CHECK (activation_phase IN ('ON_EXECUTION_START', 'DURING_EXECUTION', 'ON_ACTION_RESOLVE', 'ON_HIT', 'ON_PASSIVE_TRIGGER'))
 CHECK (target_selector IN ('SELF', 'OPPONENT', 'BOTH', 'ACTION_SOURCE', 'ACTION_TARGET'))
 CHECK (sequence_order >= 0)
 ```
@@ -1171,6 +1215,7 @@ ON action_effects(effect_definition_id);
 - `sequence_order` controls the order of Effect resolution.
 - Target selection belongs to this mapping so the same reusable Effect can be applied to different targets.
 - Cost payment should be handled before resolving Effects.
+- `RESOLVE_ON_COMPLETION` Actions normally use `ON_ACTION_RESOLVE`. `ACTIVE_DURING_EXECUTION` Actions use `DURING_EXECUTION` for the complete `(start, end]` interval.
 - `stop_on_failure` defines deterministic failure behavior.
 - This table allows the same Effect definition to be reused across multiple Actions and levels.
 - This table supports data-driven Action design without hardcoding every Action’s behavior in server code.
@@ -1282,7 +1327,7 @@ The `matches` table stores the main runtime state of a match.
 
 A match is created from a room after both players are ready and connected. The match proceeds through pre-match selection, Renewal, Ascension, Action Strategy, Battle, and Game Over phases.
 
-Battle resolution is simultaneous and tick-based. There is no initiative field.
+Battle resolution is simultaneous on a shared timeline. One tick is 0.1 second, and there is no initiative field.
 
 #### Columns
 
@@ -1293,7 +1338,7 @@ Battle resolution is simultaneous and tick-based. There is no initiative field.
 | `status` | `varchar(30)` |  | No | Current match status. |
 | `phase` | `varchar(50)` |  | No | Current match phase. |
 | `current_round_number` | `int` |  | No | Current round number. Starts at 1. |
-| `current_tick_index` | `int` |  | No | Current Battle tick index within the current round. Starts at 0. |
+| `current_timeline_tick` | `int` |  | No | Current 0.1-second Battle timeline tick within the current round. Starts at 0. |
 | `phase_started_at` | `timestamptz` |  | Yes | Timestamp when the current phase started. |
 | `phase_deadline_at` | `timestamptz` |  | Yes | Server-owned deadline for the current phase. |
 | `log_text` | `text` |  | Yes | Optional plain-text match log summary. Used for simple display or debugging, not full replay. |
@@ -1325,6 +1370,7 @@ CHECK (status IN ('CREATED', 'IN_PROGRESS', 'GAME_OVER', 'CANCELLED'))
 ```sql id="t2hxn2"
 CHECK (
   phase IN (
+    'PRE_MATCH_BASIC_SELECTION',
     'PRE_MATCH_MAIN_SECT_SELECTION',
     'PRE_MATCH_SUPPORT_SELECTION',
     'RENEWAL',
@@ -1341,7 +1387,7 @@ CHECK (current_round_number >= 1)
 ```
 
 ```sql id="6fxr08"
-CHECK (current_tick_index >= 0)
+CHECK (current_timeline_tick >= 0)
 ```
 
 #### Recommended Indexes
@@ -1369,8 +1415,8 @@ ON matches(status);
 #### Notes
 
 - `current_round_number` tracks the active round.
-- `current_tick_index` tracks the current simultaneous Battle step.
-- The server increments `current_tick_index` after resolving a Battle tick.
+- `current_timeline_tick` tracks the shared Battle time. Actions occupy `(start_tick, end_tick]` and may have different boundaries for each player.
+- The server advances `current_timeline_tick` after resolving every event scheduled at the current timeline point.
 - `phase_deadline_at` is controlled by the server. Clients may display a countdown but must not advance phases.
 - `log_text` is optional and intentionally simple. It should contain human-readable summaries, not structured replay data.
 - Full Battle replay is not part of the current schema.
@@ -1396,10 +1442,14 @@ Stats and resources are stored directly in this table to provide fast UI renderi
 | `seat` | `varchar(20)` |  | No | Player seat in the match. Used for UI and stable ordering only. |
 | `main_sect_id` | `uuid` | FK | Yes | Main Sect selected by the player. References `sects.id`. |
 | `support_sect_id` | `uuid` | FK | Yes | Support Sect selected by the player. References `sects.id`. |
+| `str_level` | `int` |  | No | Current upgrade level of STR, from 1 through 3. |
 | `str_value` | `int` |  | No | Current STR value. |
+| `hp_level` | `int` |  | No | Current upgrade level of HP, from 1 through 3. |
 | `hp_current` | `int` |  | No | Current HP value. |
 | `hp_max` | `int` |  | No | Maximum HP value. Healing cannot exceed this value. |
+| `def_level` | `int` |  | No | Current upgrade level of DEF, from 1 through 3. |
 | `def_value` | `int` |  | No | Current DEF value. |
+| `as_level` | `int` |  | No | Current upgrade level of AS, from 1 through 3. |
 | `as_value` | `int` |  | No | Current AS value. |
 | `mp_current` | `int` |  | No | Current MP value. |
 | `mp_max` | `int` |  | No | Maximum MP value. MP restoration cannot exceed this value. |
@@ -1456,11 +1506,18 @@ CHECK (str_value >= 0)
 CHECK (hp_current >= 0)
 CHECK (hp_max >= 0)
 CHECK (def_value >= 0)
-CHECK (as_value >= 0)
+CHECK (as_value >= 1)
 CHECK (mp_current >= 0)
 CHECK (mp_max >= 0)
 CHECK (qp_current >= 0)
 CHECK (qp_max >= 0)
+```
+
+```sql
+CHECK (str_level BETWEEN 1 AND 3)
+CHECK (hp_level BETWEEN 1 AND 3)
+CHECK (def_level BETWEEN 1 AND 3)
+CHECK (as_level BETWEEN 1 AND 3)
 ```
 
 ```sql id="sc2jnu"
@@ -1497,7 +1554,7 @@ ON match_players(user_id);
 | `match_players.user_id` → `users.id` | Each match player represents one user. |
 | `match_players.main_sect_id` → `sects.id` | The selected Main Sect. |
 | `match_players.support_sect_id` → `sects.id` | The selected Support Sect. |
-| `match_players.id` → `match_player_action_slots.match_player_id` | Each player has five Action slots. |
+| `match_players.id` → `match_player_action_slots.match_player_id` | Each player has six Action slots. |
 | `match_players.id` → `action_queue_entries.match_player_id` | A player can have multiple queue entries per round. |
 | `match_players.id` → `active_effects.target_match_player_id` | A player can be affected by active Effects. |
 | `match_players.id` → `active_effects.source_match_player_id` | A player can be the source of active Effects. |
@@ -1507,9 +1564,10 @@ ON match_players(user_id);
 
 #### Notes
 
-- `seat` has no gameplay priority. Battle is simultaneous and tick-based.
+- `seat` has no gameplay priority. Battle is simultaneous on a shared 0.1-second timeline.
 - `main_sect_id` and `support_sect_id` are null until the corresponding pre-match selections are resolved.
-- The five selected cards are stored only in `match_player_action_slots`; Action IDs are not duplicated in this table.
+- The six selected Actions are stored only in `match_player_action_slots`; Action IDs are not duplicated in this table.
+- Only `HP`, `STR`, `DEF`, and `AS` have Ascension upgrade levels. `MP` and `QP` are resources and have no Ascension level columns.
 - HP, MP, and QP have current and max values.
 - Healing cannot increase `hp_current` above `hp_max`.
 - MP restoration cannot increase `mp_current` above `mp_max`.
@@ -1521,26 +1579,27 @@ ON match_players(user_id);
 
 ### `match_player_action_slots`
 
-The `match_player_action_slots` table stores the five cards held by a match player.
+The `match_player_action_slots` table stores the six Actions held by a match player.
 
-Each player has exactly five Action slots during a match:
+Each player has exactly six Action slots during a match:
 
 ```text id="90xkej"
-- BASIC
+- BASIC_1
+- BASIC_2
 - MAIN_1
 - MAIN_2
 - MAIN_3
 - SUPPORT
 ```
 
-The three Main slots are selected from the Main Sect. The Support slot is selected from the Support Sect. Slots may contain active or passive Actions. The Action Queue may select and repeat only active slots.
+The two Basic slots contain two distinct Actions selected from Slash, Defend, and Shield. The three Main slots are selected from the Main Sect. The Support slot is selected from the Support Sect. Slots may contain active or passive Actions. The Action Queue may reference active slots; confirmation does not block invalid submissions, and execution eligibility is decided at runtime.
 
 Action unlock state is represented by `current_level`.
 
 ```text id="h74wqo"
 current_level = 0 means locked.
 current_level >= 1 means unlocked.
-Basic Action starts at level 1.
+Selected Basic Actions start at level 1.
 ```
 
 #### Columns
@@ -1578,11 +1637,11 @@ UNIQUE (match_player_id, slot_type)
 ```
 
 ```sql id="hq2l3n"
-CHECK (slot_type IN ('BASIC', 'MAIN_1', 'MAIN_2', 'MAIN_3', 'SUPPORT'))
+CHECK (slot_type IN ('BASIC_1', 'BASIC_2', 'MAIN_1', 'MAIN_2', 'MAIN_3', 'SUPPORT'))
 ```
 
 ```sql id="x5cbxk"
-CHECK (current_level >= 0)
+CHECK (current_level BETWEEN 0 AND 3)
 ```
 
 #### Recommended Indexes
@@ -1608,13 +1667,14 @@ ON match_player_action_slots(action_id);
 
 #### Notes
 
-- The service layer should create exactly five Action slots for each match player.
-- The Basic Action slot should start at `current_level = 1`.
+- The service layer should create exactly six Action slots for each match player.
+- `BASIC_1` and `BASIC_2` must reference two distinct `actions.action_key` values selected from `SLASH`, `DEFEND`, and `SHIELD`.
+- Both Basic Action slots start at `current_level = 1`.
 - Main and Support Action slots may start at `current_level = 0` if the Action is locked.
 - `MAIN_1`, `MAIN_2`, and `MAIN_3` must be distinct Actions belonging to the selected Main Sect.
 - `SUPPORT` must belong to the selected Support Sect, must not duplicate a Main Action, and must reference an Action with `is_ultimate = false`.
 - Main and Support Sects may be the same.
-- An Action may be queued only when `current_level >= 1` and `actions.activation_type = 'ACTIVE'`.
+- Queue submission may reference any player-owned slot and is not blocked by validation. At runtime, an occurrence executes only when `current_level >= 1`, `actions.activation_type = 'ACTIVE'`, and all other runtime requirements are satisfied.
 - Passive Actions remain in the player's hand and are evaluated by the passive trigger engine.
 - Action level upgrades update `current_level`.
 
@@ -1622,11 +1682,11 @@ ON match_player_action_slots(action_id);
 
 ### `action_queue_entries`
 
-The `action_queue_entries` table stores a player’s Action Queue for a specific round.
+The `action_queue_entries` table stores a player's submitted Action Queue for a specific round.
 
-Each row represents one queue slot. The same Action slot can appear multiple times in the same queue.
+Each row represents one ordered Action occurrence. Queue capacity is a timeline duration limit, not an entry-count limit. The same Action slot can appear multiple times in the same queue.
 
-If a player fails to fill the full Action Queue before timeout, the server creates explicit empty queue entries with `entry_status = 'EMPTY_TIMEOUT'`.
+The optional queue-check operation is advisory and does not write these rows. Confirmation stores and locks the submitted occurrences without validating or rejecting them. If the player times out, the server uses an empty queue.
 
 #### Columns
 
@@ -1636,9 +1696,12 @@ If a player fails to fill the full Action Queue before timeout, the server creat
 | `match_id` | `uuid` | FK | No | Match this queue entry belongs to. References `matches.id`. |
 | `match_player_id` | `uuid` | FK | No | Match player who owns this queue entry. References `match_players.id`. |
 | `round_number` | `int` |  | No | Round number this queue entry belongs to. |
-| `slot_index` | `int` |  | No | Zero-based position in the Action Queue. |
-| `action_slot_id` | `uuid` | FK | Yes | Selected Action slot. Null when `entry_status = 'EMPTY_TIMEOUT'`. References `match_player_action_slots.id`. |
-| `entry_status` | `varchar(30)` |  | No | Queue entry status. |
+| `sequence_index` | `int` |  | No | Zero-based occurrence order in the Action Queue. |
+| `action_slot_id` | `uuid` | FK | Yes | Submitted Action slot. Set to null when runtime converts an invalid occurrence to `EMPTY_RUNTIME`. References `match_player_action_slots.id`. |
+| `entry_status` | `varchar(30)` |  | No | Submitted or runtime-empty state of this occurrence. |
+| `scheduled_start_tick` | `int` |  | Yes | Computed start on the 0.1-second Battle timeline. Null before scheduling. |
+| `scheduled_end_tick` | `int` |  | Yes | Computed inclusive end on the 0.1-second Battle timeline. Null before scheduling. The interval is `(start, end]`. |
+| `runtime_failure_reason` | `varchar(50)` |  | Yes | Reason an occurrence became `EMPTY_RUNTIME`. |
 | `created_at` | `timestamptz` |  | No | Timestamp when the queue entry was created. |
 | `updated_at` | `timestamptz` |  | No | Timestamp when the queue entry was last updated. |
 
@@ -1665,7 +1728,7 @@ FOREIGN KEY (action_slot_id) REFERENCES match_player_action_slots(id)
 #### Constraints
 
 ```sql id="0mctx7"
-UNIQUE (match_player_id, round_number, slot_index)
+UNIQUE (match_player_id, round_number, sequence_index)
 ```
 
 ```sql id="r8uk6o"
@@ -1673,18 +1736,44 @@ CHECK (round_number >= 1)
 ```
 
 ```sql id="0ukpqp"
-CHECK (slot_index >= 0)
+CHECK (sequence_index >= 0)
 ```
 
 ```sql id="br6y5x"
-CHECK (entry_status IN ('PLANNED', 'EMPTY_TIMEOUT'))
+CHECK (entry_status IN ('SUBMITTED', 'EMPTY_RUNTIME', 'EXECUTED'))
+```
+
+```sql
+CHECK (
+  runtime_failure_reason IS NULL
+  OR runtime_failure_reason IN (
+    'DURATION_LIMIT_EXCEEDED',
+    'COUNTDOWN_INVALID',
+    'INSUFFICIENT_RESOURCE',
+    'ACTION_NOT_OWNED',
+    'ACTION_LOCKED',
+    'ACTION_NOT_QUEUEABLE',
+    'DISABLED_BY_EFFECT',
+    'QUEUE_TRANSITION_INVALID'
+  )
+)
 ```
 
 ```sql id="y2dszp"
 CHECK (
-  (entry_status = 'PLANNED' AND action_slot_id IS NOT NULL)
+  (entry_status IN ('SUBMITTED', 'EXECUTED') AND action_slot_id IS NOT NULL AND runtime_failure_reason IS NULL)
   OR
-  (entry_status = 'EMPTY_TIMEOUT' AND action_slot_id IS NULL)
+  (entry_status = 'EMPTY_RUNTIME' AND action_slot_id IS NULL AND runtime_failure_reason IS NOT NULL)
+)
+```
+
+```sql
+CHECK (scheduled_start_tick IS NULL OR scheduled_start_tick >= 0)
+CHECK (scheduled_end_tick IS NULL OR scheduled_end_tick >= 1)
+CHECK (
+  (scheduled_start_tick IS NULL AND scheduled_end_tick IS NULL)
+  OR
+  (scheduled_start_tick IS NOT NULL AND scheduled_end_tick > scheduled_start_tick)
 )
 ```
 
@@ -1712,11 +1801,14 @@ ON action_queue_entries(match_player_id, round_number);
 
 - Queue entries reference `match_player_action_slots`, not `actions` directly.
 - The same `action_slot_id` may appear multiple times in the same round.
-- The service layer should validate that the selected Action slot belongs to the same `match_player_id`.
-- The service layer should validate that `current_level >= 1` before allowing an Action slot to be queued.
-- The service layer should validate that the selected Action has `activation_type = 'ACTIVE'`.
-- Attempting to queue a passive Action is rejected with `ACTION_NOT_QUEUEABLE`.
-- Empty timeout slots are represented explicitly to make Battle resolution deterministic.
+- Queue confirmation does not run validation and does not reject an invalid queue.
+- Before confirmation, the server may calculate an advisory result containing timing, cooldown, stack, transition, ownership, level, and activation-type violations without persisting or locking the queue. It never checks resource sufficiency.
+- At runtime, the service layer checks ownership, Action level, activation type, timeline duration, cooldown, consecutive stack, costs, disabled state, and other execution requirements.
+- A runtime-invalid occurrence is changed to `EMPTY_RUNTIME`, its `action_slot_id` is cleared, and `runtime_failure_reason` records why. It pays no cost and produces no Action Effects.
+- Runtime conversion to `EMPTY_RUNTIME` must not stop the opponent's timeline.
+- `scheduled_start_tick` and `scheduled_end_tick` preserve deterministic `(start, end]` timing, including after an occurrence becomes `EMPTY_RUNTIME`, so later Actions do not shift. Action duration is never modified by AS. Only Slash cooldown is divided by the player's current AS and rounded down to whole ticks.
+- The service layer enforces the round duration limit: 20 ticks in round 1, then 30, 40, 50, 60, and 70 ticks from round 6 onward.
+- After round 1, a valid sequence is derived from the previous confirmed sequence by removing zero or one occurrence, retaining relative order, and inserting new occurrences anywhere. Advisory validation reports violations without blocking confirmation; at runtime, violating occurrences are converted to `EMPTY_RUNTIME` with `QUEUE_TRANSITION_INVALID`.
 
 ---
 
@@ -1734,6 +1826,7 @@ Examples:
 - Regeneration
 - Temporary max MP increase
 - Defense reduction
+- One-charge Shield
 ```
 
 Instant Effects do not need to be stored in this table. Effects with duration or ongoing behavior are stored here.
@@ -1748,7 +1841,9 @@ Instant Effects do not need to be stored in this table. Effects with duration or
 | `source_match_player_id` | `uuid` | FK | Yes | Match player who caused the Effect. References `match_players.id`. |
 | `effect_definition_id` | `uuid` | FK | No | Static Effect definition. References `effect_definitions.id`. |
 | `current_stacks` | `int` |  | No | Current number of stacks for this Effect. |
+| `remaining_ticks` | `int` |  | Yes | Remaining 0.1-second Battle ticks. Null for non-tick-based Effects. |
 | `remaining_rounds` | `int` |  | Yes | Number of rounds remaining. Null may be used for Effects that do not expire by round count. |
+| `remaining_charges` | `int` |  | Yes | Remaining consumable charges. Null for Effects that are not charge-based. |
 | `created_at` | `timestamptz` |  | No | Timestamp when the active Effect was created. |
 | `updated_at` | `timestamptz` |  | No | Timestamp when the active Effect was last updated. |
 
@@ -1786,6 +1881,11 @@ CHECK (current_stacks >= 1)
 CHECK (remaining_rounds IS NULL OR remaining_rounds >= 0)
 ```
 
+```sql
+CHECK (remaining_ticks IS NULL OR remaining_ticks >= 0)
+CHECK (remaining_charges IS NULL OR remaining_charges >= 0)
+```
+
 #### Recommended Indexes
 
 ```sql id="n37juz"
@@ -1818,6 +1918,8 @@ ON active_effects(effect_definition_id);
 - Effects with duration, delayed triggers, stacking, or repeated behavior should be stored here.
 - Stacking behavior is defined by `effect_definitions.stacking_policy`.
 - The service layer should enforce max stack rules using `effect_definitions.max_stacks`.
+- Charge-based Effects are removed when `remaining_charges` reaches 0. A Shield decrements its charge when it negates an incoming damage instance.
+- Tick-based Effects use the shared 0.1-second timeline and remain active through their inclusive endpoint.
 - When an active Effect expires, the service layer may delete the row or keep it until match cleanup. The recommended behavior is to delete expired active Effects.
 
 ---
@@ -2021,7 +2123,7 @@ ON match_results(winner_match_player_id);
 
 #### Notes
 
-- `DRAW` is used when both players meet a losing condition at the same simultaneous Battle tick.
+- `DRAW` is used when both players meet a losing condition at the same Battle timeline point.
 - For `DRAW`, both winner and loser are null.
 - For `SURRENDER`, the surrendering player is the loser and the opponent is the winner.
 - For `DISCONNECTED`, the disconnected player is the loser and the opponent is the winner.
