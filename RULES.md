@@ -61,9 +61,9 @@ RESOLVE_ON_COMPLETION
 ACTIVE_DURING_EXECUTION
 ```
 
-`RESOLVE_ON_COMPLETION` means the Action prepares throughout its duration and applies its configured Effects at the endpoint. For example, an Attack occupying `(0.0, 1.0]` deals damage at `1.0`.
+`RESOLVE_ON_COMPLETION` means the Action prepares throughout its duration and applies its configured Effects at the endpoint. For example, the Basic Action Slash occupying `(0.0, 1.0]` deals damage at `1.0`.
 
-`ACTIVE_DURING_EXECUTION` means the configured Effects remain active throughout the complete `(start, end]` execution interval. For example, Guard occupying `(0.0, 1.0]` increases DEF throughout that interval, including at `1.0`, and can defend against an Attack that resolves at `1.0`.
+`ACTIVE_DURING_EXECUTION` means the configured Effects remain active throughout the complete `(start, end]` execution interval. For example, the Basic Action Defend occupying `(0.0, 1.0]` increases DEF throughout that interval, including at `1.0`, and can defend against a Slash that resolves at `1.0`.
 
 ### 3.4 Action components
 
@@ -76,14 +76,14 @@ Each Action level defines:
 
 Time is represented by integer ticks. One tick is `0.1` second.
 
-For a Basic Action:
+For Slash only:
 
 ```text
 rawDurationSeconds = baseDurationSeconds / AS
 effectiveDurationTicks = max(1, floor(rawDurationSeconds * 10))
 ```
 
-This rounds down to the nearest `0.1` second. For example, `0.333` second becomes `0.3` second, or 3 ticks. Main and Support Sect Technique durations are not modified by `AS`.
+This rounds down to the nearest `0.1` second. For example, `0.333` second becomes `0.3` second, or 3 ticks. Defend, Shield, and Main or Support Sect Technique durations are not modified by `AS`.
 
 ### 3.5 Stack and cooldown
 
@@ -101,7 +101,7 @@ For `stack = 1`, cooldown begins after every occurrence.
 
 An Action may create an Effect whose lifetime differs from the Action's execution duration. Such an Effect remains active until its lifetime expires or its removal condition is met.
 
-Example: a Shield Action may execute for 1 second and then create a Shield Effect with a 2-second lifetime and one charge. The Shield negates the next incoming damage instance and is removed immediately when its charge is consumed. A later attack deals damage normally.
+Example: the Basic Action Shield may execute for 1 second and then create a Shield Effect with a 2-second lifetime and one charge. The Shield negates the next incoming damage instance and is removed immediately when its charge is consumed. A later attack deals damage normally.
 
 Actions or Effects that dynamically change another Action's duration or cooldown are reserved for a future version and are not implemented in the next version.
 
@@ -120,7 +120,19 @@ Passive progress is current runtime state, not Battle history. A three-hit passi
 
 ## 4. Pre-Match Selection
 
-### 4.1 Main loadout
+### 4.1 Basic Action selection
+
+Each player secretly selects exactly two distinct Basic Actions from:
+
+```text
+SLASH
+DEFEND
+SHIELD
+```
+
+Both selected Basic Actions start at level 1. Basic Action selections are stored in the two generic Basic slots; the Action itself determines whether the slot contains Slash, Defend, or Shield.
+
+### 4.2 Main loadout
 
 Each player secretly selects:
 
@@ -131,7 +143,7 @@ Main Techniques may be active, passive, or Ultimate.
 
 After both players confirm, both Main loadouts are revealed simultaneously.
 
-### 4.2 Support loadout
+### 4.3 Support loadout
 
 Each player then secretly selects:
 
@@ -146,20 +158,20 @@ The Support Technique:
 
 After both players confirm, both Support loadouts are revealed simultaneously.
 
-### 4.3 Final loadout
+### 4.4 Final loadout
 
 Each player has exactly six Action slots:
 
 ```text
-BASIC_SLASH
-BASIC_GUARD
+BASIC_1
+BASIC_2
 MAIN_1
 MAIN_2
 MAIN_3
 SUPPORT
 ```
 
-Both Basic Actions start at level 1.
+The two Basic slots contain two distinct Actions selected from Slash, Defend, and Shield. Both Basic Actions start at level 1.
 
 Other Actions may begin locked:
 
@@ -179,7 +191,7 @@ A selected but locked Action remains in the loadout and can be learned during As
 | `STR` | Offensive power used by server damage calculations. |
 | `HP` | Health. Reaching 0 satisfies a match-end condition. |
 | `DEF` | Damage reduction used by server calculations. |
-| `AS` | Attack speed that reduces Basic Action duration. |
+| `AS` | Attack speed that reduces Slash duration only. |
 | `MP` | Resource consumed by Actions. |
 | `QP` | Special resource consumed by selected Actions. |
 
@@ -349,6 +361,7 @@ If an occurrence is invalid:
 
 - It is removed from execution and treated as an `EMPTY_SLOT`.
 - It pays no costs and produces no Action Effects.
+- Its scheduled timeline interval remains reserved, so later Actions do not shift earlier.
 - The opponent's timeline continues normally.
 
 Predictable costs may be reported by the optional queue check, but only the runtime check determines whether an occurrence executes.
