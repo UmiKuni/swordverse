@@ -16,7 +16,7 @@ The client submits player decisions. The server owns all official validation, ca
 - Both players must be present, connected, and ready before the host starts the match.
 - The host may remove Player B before the match starts.
 - Either player may leave before the match starts.
-- If Player A leaves while Player B remains, Player B becomes Player A.
+- If Player A leaves while Player B remains, Player B becomes Player A (host).
 - Disconnecting does not immediately remove a player from the room. A disconnected player keeps their slot until they leave, are removed, or the room closes.
 
 ## 3. Sects and Actions
@@ -30,7 +30,7 @@ Each Sect defines:
 - An MP-to-QP conversion ratio when used as the Main Sect.
 - A set of Sect Techniques, normally around five.
 
-The Support Sect may be the same as the Main Sect.
+Support Sect and Main Sect have the same list of attribute.
 
 ### 3.2 Action source and activation type
 
@@ -48,9 +48,9 @@ ACTIVE
 PASSIVE
 ```
 
-Only learned Active Actions may be placed in the Action Queue. Passive Actions activate automatically when server-observed conditions are met and cannot be queued.
+Only learned Active Actions may be placed in the Action Queue. Passive Actions activate automatically when server-observed conditions are met and cannot be add into the Action Queue.
 
-A Sect Technique may additionally be marked as an **Ultimate**. Source, activation type, and Ultimate status are independent classifications.
+Note that an **Ultimate Action** can only be selected as a Main Technique.
 
 ### 3.3 Active Action resolution type
 
@@ -76,14 +76,15 @@ Each Action level defines:
 
 Time is represented by integer ticks. One tick is `0.1` second.
 
-For Slash only:
+AS does not modify Action duration. Every Action uses its configured duration unchanged.
+
+For Slash cooldown only:
 
 ```text
-rawDurationSeconds = baseDurationSeconds / AS
-effectiveDurationTicks = max(1, floor(rawDurationSeconds * 10))
+effectiveCooldownTicks = max(0, floor(baseCooldownTicks / AS))
 ```
 
-This rounds down to the nearest `0.1` second. For example, `0.333` second becomes `0.3` second, or 3 ticks. Defend, Shield, and Main or Support Sect Technique durations are not modified by `AS`.
+Cooldown is measured in `0.1`-second ticks, so this rounds down to the nearest tick. Defend, Shield, and Main or Support Sect Technique cooldowns are not modified by `AS`.
 
 ### 3.5 Stack and cooldown
 
@@ -130,7 +131,7 @@ DEFEND
 SHIELD
 ```
 
-Both selected Basic Actions start at level 1. Basic Action selections are stored in the two generic Basic slots; the Action itself determines whether the slot contains Slash, Defend, or Shield.
+After both players confirm, both Basic loadouts are revealed simultaneously.
 
 ### 4.2 Main loadout
 
@@ -171,9 +172,7 @@ MAIN_3
 SUPPORT
 ```
 
-The two Basic slots contain two distinct Actions selected from Slash, Defend, and Shield. Both Basic Actions start at level 1.
-
-Other Actions may begin locked:
+Both Basic Actions start at level 1. Other Actions may begin locked:
 
 ```text
 currentLevel = 0  → locked
@@ -191,7 +190,7 @@ A selected but locked Action remains in the loadout and can be learned during As
 | `STR` | Offensive power used by server damage calculations. |
 | `HP` | Health. Reaching 0 satisfies a match-end condition. |
 | `DEF` | Damage reduction used by server calculations. |
-| `AS` | Attack speed that reduces Slash duration only. |
+| `AS` | Attack speed that reduces Slash cooldown only. |
 | `MP` | Resource consumed by Actions. |
 | `QP` | Special resource consumed by selected Actions. |
 
@@ -217,10 +216,7 @@ Rules:
 Each round contains:
 
 ```text
-RENEWAL
-→ ASCENSION
-→ ACTION STRATEGY
-→ BATTLE
+RENEWAL → ASCENSION → ACTION STRATEGY → BATTLE
 ```
 
 If no match-end condition is satisfied after Battle, the next round begins with Renewal.
@@ -301,7 +297,7 @@ Rules:
 1. Remove zero or one occurrence from the previous confirmed queue.
 2. Preserve the relative order of all retained occurrences.
 3. Insert newly selected occurrences at the beginning, end, or between retained occurrences.
-4. Validate the complete resulting queue against the current round's duration, cooldown, stack, eligibility, and predictable resource rules.
+4. Check the complete resulting queue against the current round's duration, cooldown, stack, transition, and eligibility rules.
 
 ### 9.4 Queue validation
 
@@ -312,18 +308,16 @@ The server returns whether the queue is valid and all detected violations, inclu
 ```text
 DURATION_LIMIT_EXCEEDED
 COUNTDOWN_INVALID
-INSUFFICIENT_RESOURCE
 ```
 
 Validation checks:
 
 - Total effective duration does not exceed the round's duration limit.
 - Cooldown and consecutive stack rules are satisfied.
-- The player has sufficient predictable MP, QP, HP, and other configured resources, evaluated in queue order.
 - The queue satisfies the previous-round removal and retained-order rules.
 - Every occurrence references an eligible Action.
 
-Resource changes that depend on unknown opponent Actions or unresolved Battle outcomes cannot be guaranteed during queue validation. All Action occurrences are therefore checked against the actual state at runtime.
+The optional queue check never evaluates MP, QP, HP, or any other Action cost. All resource requirements are checked only against actual state at runtime.
 
 ### 9.5 Confirmation and timeout
 
@@ -364,7 +358,7 @@ If an occurrence is invalid:
 - Its scheduled timeline interval remains reserved, so later Actions do not shift earlier.
 - The opponent's timeline continues normally.
 
-Predictable costs may be reported by the optional queue check, but only the runtime check determines whether an occurrence executes.
+The optional queue check does not inspect costs. Only the runtime check determines whether an occurrence can pay its costs and execute.
 
 ### 10.3 Action costs
 

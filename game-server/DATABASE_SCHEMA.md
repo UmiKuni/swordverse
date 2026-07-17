@@ -742,7 +742,7 @@ The `action_levels` table only stores actual configured levels, usually level 1 
 | `level` | `int` |  | No | Level number of the Action, from 1 through 3. |
 | `learning_point_cost` | `int` |  | No | LP cost required to learn or upgrade to this level. |
 | `base_duration_ticks` | `int` |  | Yes | Base execution duration in 0.1-second ticks. Required for Active Actions and null for Passive Actions. |
-| `cooldown_ticks` | `int` |  | Yes | Cooldown after the Action's consecutive stack chain, in 0.1-second ticks. Required for Active Actions. |
+| `cooldown_ticks` | `int` |  | Yes | Configured base cooldown after the Action's consecutive stack chain, in 0.1-second ticks. Required for Active Actions. |
 | `max_consecutive_stacks` | `int` |  | Yes | Maximum immediately consecutive uses before cooldown applies. Required for Active Actions. |
 | `created_at` | `timestamptz` |  | No | Timestamp when the Action level record was created. |
 | `updated_at` | `timestamptz` |  | No | Timestamp when the Action level record was last updated. |
@@ -798,7 +798,7 @@ ON action_levels(action_id);
 - `learning_point_cost` is used during the Ascension Phase.
 - Active Action levels must define `base_duration_ticks`, `cooldown_ticks`, and `max_consecutive_stacks`; Passive Action levels leave these columns null. This cross-table rule is enforced by the service layer.
 - One tick is exactly 0.1 second.
-- For Slash only, `effective_duration_ticks = max(1, floor(base_duration_ticks / AS))`. Defend, Shield, and Main or Support Sect Technique durations are not modified by `AS`.
+- AS does not modify any Action's duration. For Slash only, `effective_cooldown_ticks = max(0, floor(cooldown_ticks / AS))`. Defend, Shield, and Main or Support Sect Technique cooldowns are not modified by `AS`.
 - Cooldown begins at the end of the final occurrence in a gapless stack chain. Each occurrence pays its own configured costs.
 - Dynamic Effects that modify another Action's duration or cooldown are intentionally not supported in the next version; the tick columns leave room for that future extension.
 - If a player has `current_level = 0`, the Action is locked and cannot be used.
@@ -870,7 +870,7 @@ CHECK (sequence_order >= 0)
 
 - Java maps `resource_type` and `calculation_type` to enums.
 - Costs are paid atomically. If any required cost cannot be paid, no cost is paid and the Action fails.
-- Runtime validation uses `payment_timing`; advisory queue validation simulates all predictable costs in sequence.
+- Runtime validation uses `payment_timing`. Advisory queue validation never evaluates or simulates Action costs.
 - The service layer defines whether HP costs are allowed to reduce HP to zero.
 
 ---
@@ -1802,11 +1802,11 @@ ON action_queue_entries(match_player_id, round_number);
 - Queue entries reference `match_player_action_slots`, not `actions` directly.
 - The same `action_slot_id` may appear multiple times in the same round.
 - Queue confirmation does not run validation and does not reject an invalid queue.
-- Before confirmation, the server may calculate an advisory result containing `DURATION_LIMIT_EXCEEDED`, `COUNTDOWN_INVALID`, and `INSUFFICIENT_RESOURCE` violations without persisting or locking the queue.
+- Before confirmation, the server may calculate an advisory result containing timing, cooldown, stack, transition, ownership, level, and activation-type violations without persisting or locking the queue. It never checks resource sufficiency.
 - At runtime, the service layer checks ownership, Action level, activation type, timeline duration, cooldown, consecutive stack, costs, disabled state, and other execution requirements.
 - A runtime-invalid occurrence is changed to `EMPTY_RUNTIME`, its `action_slot_id` is cleared, and `runtime_failure_reason` records why. It pays no cost and produces no Action Effects.
 - Runtime conversion to `EMPTY_RUNTIME` must not stop the opponent's timeline.
-- `scheduled_start_tick` and `scheduled_end_tick` preserve deterministic `(start, end]` timing, including after an occurrence becomes `EMPTY_RUNTIME`, so later Actions do not shift. Only Slash duration is calculated using the player's current AS and rounded down to whole ticks.
+- `scheduled_start_tick` and `scheduled_end_tick` preserve deterministic `(start, end]` timing, including after an occurrence becomes `EMPTY_RUNTIME`, so later Actions do not shift. Action duration is never modified by AS. Only Slash cooldown is divided by the player's current AS and rounded down to whole ticks.
 - The service layer enforces the round duration limit: 20 ticks in round 1, then 30, 40, 50, 60, and 70 ticks from round 6 onward.
 - After round 1, a valid sequence is derived from the previous confirmed sequence by removing zero or one occurrence, retaining relative order, and inserting new occurrences anywhere. Advisory validation reports violations without blocking confirmation; at runtime, violating occurrences are converted to `EMPTY_RUNTIME` with `QUEUE_TRANSITION_INVALID`.
 

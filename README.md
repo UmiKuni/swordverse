@@ -20,7 +20,7 @@ Both players must be present, connected, and ready before the host can start the
 Each player has exactly six Actions:
 
 ```text
-2 Basic Actions selected from: Slash, Defend, and Shield
+2 Basic Actions
 3 Main Sect Techniques
 1 Support Sect Technique
 ```
@@ -45,17 +45,14 @@ Active Actions also define how their Effects resolve:
 Every round has four phases:
 
 ```text
-RENEWAL
-→ ASCENSION
-→ ACTION STRATEGY
-→ BATTLE
+RENEWAL → ASCENSION → ACTION STRATEGY → BATTLE
 ```
 
-#### Renewal
+#### 3.1. Renewal
 
 The server resolves ongoing Effects, converts remaining MP into QP, and restores MP.
 
-#### Ascension
+#### 3.2. Ascension
 
 Spend up to 2 Learning Points to:
 
@@ -65,24 +62,23 @@ Spend up to 2 Learning Points to:
 
 Stats and Actions have a maximum level of 3. An Action at level 0 is locked; an Action at level 1 or higher is learned.
 
-#### Action Strategy
+#### 3.3. Action Strategy
 
 Build your Action Queue using learned Active Actions from your six-Action loadout.
 
 Queue capacity is a duration limit, not a number of Actions. Time is measured in `0.1` second ticks. A queue is valid only when:
 
-- Its total effective duration does not exceed the round's duration limit.
+- Its total duration does not exceed the round's duration limit, including the Action's duration and empty space between if have.
 - Every Action satisfies its cooldown and stack rules.
-- The player has sufficient predictable resources for its costs.
 - After round 1, it is derived from the previous queue by removing zero or one occurrence, preserving retained order, and inserting new Actions anywhere.
 
-Only Slash duration is divided by `AS`, rounded down to the nearest `0.1` second, with a minimum duration of one tick. Defend, Shield, and all Main or Support Sect Technique durations are not changed by `AS`.
+AS does not change any Action's duration. It reduces Slash cooldown only: Slash's configured cooldown is divided by `AS` and rounded down to whole `0.1`-second ticks. Defend, Shield, and all Main or Support Sect Technique cooldowns are not changed by `AS`.
 
 You may ask the server to check whether the current queue is valid before confirming it. This check is advisory: confirming does not validate or block the submitted queue.
 
 During Battle, the server checks each Action occurrence against the current runtime state. An invalid occurrence is removed from execution and resolved as an `EMPTY_SLOT`; it produces no Action Effects, but its scheduled timeline interval remains reserved so later Actions do not shift. The opponent's timeline continues normally.
 
-#### Battle
+#### 3.4. Battle
 
 Both queues start at time `0` and resolve on the same `0.1` second timeline. There is no initiative or alternating turn order.
 
@@ -107,7 +103,7 @@ If both players reach 0 HP at the same timeline point, the match is a draw.
 | `STR` | Offensive power. Upgradeable during Ascension. |
 | `HP` | Health. Reaching 0 ends the match. Upgradeable during Ascension. |
 | `DEF` | Damage reduction. Upgradeable during Ascension. |
-| `AS` | Reduces Slash duration only. Upgradeable during Ascension. |
+| `AS` | Reduces Slash cooldown only. Upgradeable during Ascension. |
 | `MP` | Resource used to activate Actions; not upgraded during Ascension. |
 | `QP` | Special resource used by selected Actions; not upgraded during Ascension. |
 
@@ -120,7 +116,7 @@ For complete rules, timing, selection restrictions, queue validation, cooldowns,
 ## Technical Documentation
 
 - [API_WEBSOCKET_CONTRACT.md](API_WEBSOCKET_CONTRACT.md) — REST and WebSocket contract.
-- [Database schema](game-server/DATABASE_SCHEMA.md) — PostgreSQL schema design.
+- [DATABASE_SCHEMA.md](game-server/DATABASE_SCHEMA.md) — PostgreSQL schema design.
 
 ## Technology
 

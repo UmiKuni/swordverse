@@ -144,9 +144,9 @@ Queue duration limit:
 | 5 | 6 seconds | 60 |
 | 6+ | 7 seconds | 70 |
 
-One tick is `0.1` second. Actions occupy `(startTick, endTick]`. Only Slash duration is divided by `AS` and rounded down to whole ticks with a minimum of one tick. Defend, Shield, and every Sect Technique keep their configured duration.
+One tick is `0.1` second. Actions occupy `(startTick, endTick]`, and AS does not modify any Action's duration. Only Slash cooldown is divided by `AS` and rounded down to whole ticks. Defend, Shield, and every Sect Technique keep their configured cooldown.
 
-Before confirming, the client may request an advisory queue check. It reports duration, cooldown, stack, transition, eligibility, and predictable-resource violations. It does not confirm, lock, or block the queue.
+Before confirming, the client may request an advisory queue check. It reports duration, cooldown, stack, transition, ownership, level, and activation-type violations. It never checks resource sufficiency and does not confirm, lock, or block the queue.
 
 After round 1, at most one retained queue occurrence may be removed. Retained occurrences keep their relative order; newly selected Actions may be inserted anywhere.
 
@@ -465,7 +465,7 @@ Response `200 OK`:
       "level": 1,
       "learningPointCost": 1,
       "baseDurationTicks": 10,
-      "cooldownTicks": 5,
+      "baseCooldownTicks": 5,
       "maxConsecutiveStacks": 1,
       "costs": [
         {
@@ -1173,7 +1173,8 @@ Private response:
         "actionSlotId": "863cda43-a4bf-4fd9-858a-715cc46fe982",
         "startTick": 0,
         "endTick": 10,
-        "effectiveDurationTicks": 10
+        "effectiveDurationTicks": 10,
+        "effectiveCooldownTicks": 1
       }
     ],
     "violations": [
@@ -1187,15 +1188,15 @@ Private response:
 }
 ```
 
-The check is advisory. It does not persist, confirm, lock, reject, or alter the queue. It reports every detectable violation, including `DURATION_LIMIT_EXCEEDED`, `COUNTDOWN_INVALID`, `INSUFFICIENT_RESOURCE`, `ACTION_NOT_OWNED`, `ACTION_LOCKED`, `ACTION_NOT_QUEUEABLE`, and `QUEUE_TRANSITION_INVALID`.
+The check is advisory. It does not persist, confirm, lock, reject, or alter the queue. It reports every detectable non-resource violation, including `DURATION_LIMIT_EXCEEDED`, `COUNTDOWN_INVALID`, `ACTION_NOT_OWNED`, `ACTION_LOCKED`, `ACTION_NOT_QUEUEABLE`, and `QUEUE_TRANSITION_INVALID`. It never checks MP, QP, HP, or any other Action cost.
 
-Only Slash uses AS-adjusted duration:
+AS does not modify Action duration. Only Slash uses AS-adjusted cooldown:
 
 ```text
-effectiveDurationTicks = max(1, floor(baseDurationTicks / AS))
+effectiveCooldownTicks = max(0, floor(baseCooldownTicks / AS))
 ```
 
-Defend, Shield, and Sect Technique durations use `baseDurationTicks` unchanged.
+Defend, Shield, and Sect Technique cooldowns use `baseCooldownTicks` unchanged. Every Action duration uses `baseDurationTicks` unchanged.
 
 ### 11.4 Confirm Action Queue
 
@@ -1252,13 +1253,14 @@ Errors are limited to command-level failures such as `INVALID_MATCH_PHASE`, `MAL
     "actionKey": "SLASH",
     "resolutionType": "RESOLVE_ON_COMPLETION",
     "startTick": 0,
-    "endTick": 5,
-    "effectiveDurationTicks": 5
+    "endTick": 10,
+    "effectiveDurationTicks": 10,
+    "effectiveCooldownTicks": 1
   }
 }
 ```
 
-For Slash, `effectiveDurationTicks` includes AS adjustment. Other Actions use their configured duration unchanged. `ACTIVE_DURING_EXECUTION` Effects remain active for the complete `(startTick, endTick]` interval.
+Action duration is never AS-adjusted. For Slash, `effectiveCooldownTicks` includes AS adjustment; other Actions use their configured cooldown unchanged. `ACTIVE_DURING_EXECUTION` Effects remain active for the complete `(startTick, endTick]` interval.
 
 ### 12.2 Timeline point resolved
 
@@ -1270,7 +1272,7 @@ For Slash, `effectiveDurationTicks` includes AS adjustment. Other Actions use th
   "matchId": "8262bd3a-8ad5-41b6-baf1-5e356b0ef937",
   "payload": {
     "roundNumber": 2,
-    "timelineTick": 5,
+    "timelineTick": 10,
     "outcomes": [
       {
         "playerId": "5ab5cf4a-dc55-4130-b8e2-5b7751b091e0",
@@ -1413,7 +1415,7 @@ Surrender is valid in every match phase except `GAME_OVER`. It immediately creat
 | `STAT_LEVEL_MAX` | Upgradeable Stat is already level 3. |
 | `DURATION_LIMIT_EXCEEDED` | Advisory/runtime result: an occurrence extends beyond the round duration limit. |
 | `COUNTDOWN_INVALID` | Advisory/runtime result: cooldown or consecutive-stack timing is invalid. |
-| `INSUFFICIENT_RESOURCE` | Advisory/runtime result: predictable or actual resources cannot pay the Action cost. |
+| `INSUFFICIENT_RESOURCE` | Runtime result: actual resources cannot pay the Action cost. This is never returned by queue preview validation. |
 | `ACTION_NOT_OWNED` | Advisory/runtime result: Action slot does not belong to the caller. |
 | `ACTION_LOCKED` | Advisory/runtime result: Action has level 0. |
 | `ACTION_NOT_QUEUEABLE` | Advisory/runtime result: submitted Action is not Active. |
@@ -1488,7 +1490,7 @@ export interface ActionLevelDefinition {
   level: 1 | 2 | 3;
   learningPointCost: number;
   baseDurationTicks: number | null;
-  cooldownTicks: number | null;
+  baseCooldownTicks: number | null;
   maxConsecutiveStacks: number | null;
 }
 
@@ -1524,7 +1526,6 @@ export type CheckActionQueuePayload = ConfirmActionQueuePayload;
 export type QueueViolationCode =
   | 'DURATION_LIMIT_EXCEEDED'
   | 'COUNTDOWN_INVALID'
-  | 'INSUFFICIENT_RESOURCE'
   | 'ACTION_NOT_OWNED'
   | 'ACTION_LOCKED'
   | 'ACTION_NOT_QUEUEABLE'
@@ -1607,7 +1608,6 @@ public record CheckActionQueuePayload(
 public enum QueueViolationCode {
     DURATION_LIMIT_EXCEEDED,
     COUNTDOWN_INVALID,
-    INSUFFICIENT_RESOURCE,
     ACTION_NOT_OWNED,
     ACTION_LOCKED,
     ACTION_NOT_QUEUEABLE,
