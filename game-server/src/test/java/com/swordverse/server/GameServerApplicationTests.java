@@ -1,4 +1,4 @@
-package com.example.game_server;
+package com.swordverse.server;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;

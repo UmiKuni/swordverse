@@ -1,4 +1,4 @@
-package com.swordverse.server.common;
+package com.swordverse.server.common.persistence;
 
 import java.time.LocalDateTime;
 import java.util.UUID;

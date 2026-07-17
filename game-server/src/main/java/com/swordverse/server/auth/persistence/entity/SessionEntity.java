@@ -3,7 +3,7 @@ package com.swordverse.server.auth.persistence.entity;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
-import com.swordverse.server.common.BaseEntity;
+import com.swordverse.server.common.persistence.BaseEntity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
