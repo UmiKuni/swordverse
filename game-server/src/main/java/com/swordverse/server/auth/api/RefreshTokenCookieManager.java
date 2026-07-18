@@ -10,14 +10,14 @@ import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Component;
 
 @Component
-public class RefreshTokenCookieService {
+public class RefreshTokenCookieManager {
     public static final String COOKIE_NAME = "swordverse_refresh";
     private static final String COOKIE_PATH = "/api/auth";
 
     private final AuthProperties properties;
     private final Clock clock;
 
-    public RefreshTokenCookieService(AuthProperties properties, Clock clock) {
+    public RefreshTokenCookieManager(AuthProperties properties, Clock clock) {
         this.properties = properties;
         this.clock = clock;
     }

@@ -1,6 +1,6 @@
 package com.swordverse.server.common.api;
 
-import com.swordverse.server.auth.api.RefreshTokenCookieService;
+import com.swordverse.server.auth.api.RefreshTokenCookieManager;
 import com.swordverse.server.auth.application.error.AuthError;
 import com.swordverse.server.auth.application.error.AuthException;
 import com.swordverse.server.common.error.BaseException;
@@ -17,9 +17,9 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
-    private final RefreshTokenCookieService refreshTokenCookieService;
+    private final RefreshTokenCookieManager refreshTokenCookieService;
 
-    public GlobalExceptionHandler(RefreshTokenCookieService refreshTokenCookieService) {
+    public GlobalExceptionHandler(RefreshTokenCookieManager refreshTokenCookieService) {
         this.refreshTokenCookieService = refreshTokenCookieService;
     }
 
