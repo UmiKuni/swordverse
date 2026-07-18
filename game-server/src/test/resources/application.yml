@@ -1,0 +1,23 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:swordverse_test;MODE=PostgreSQL;DB_CLOSE_DELAY=-1
+    username: sa
+    password: ""
+    driver-class-name: org.h2.Driver
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+  flyway:
+    enabled: true
+
+swordverse:
+  auth:
+    issuer: swordverse-test
+    audience: swordverse-game-server-test
+    signing-key-base64: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+    access-token-ttl: 15m
+    refresh-token-ttl: 30d
+    refresh-cookie-secure: false
+    refresh-cookie-same-site: Strict
