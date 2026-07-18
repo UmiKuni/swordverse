@@ -1,5 +1,3 @@
 package com.swordverse.server.match.realtime;
 
-public class MatchCommandController {
-    
-}
+public class MatchCommandController {}

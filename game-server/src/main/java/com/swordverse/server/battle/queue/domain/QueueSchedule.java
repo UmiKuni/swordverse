@@ -1,5 +1,3 @@
 package com.swordverse.server.battle.queue.domain;
 
-public class QueueSchedule {
-    
-}
+public class QueueSchedule {}

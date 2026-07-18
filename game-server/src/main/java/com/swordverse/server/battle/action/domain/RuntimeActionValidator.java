@@ -1,5 +1,3 @@
 package com.swordverse.server.battle.action.domain;
 
-public class RuntimeActionValidator {
-    
-}
+public class RuntimeActionValidator {}

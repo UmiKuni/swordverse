@@ -6,11 +6,8 @@ import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
 import org.springframework.security.oauth2.jwt.Jwt;
 
 final class AudienceJwtValidator implements OAuth2TokenValidator<Jwt> {
-    private static final OAuth2Error INVALID_AUDIENCE = new OAuth2Error(
-            "INVALID_TOKEN",
-            "The access token audience is invalid.",
-            null
-    );
+    private static final OAuth2Error INVALID_AUDIENCE =
+            new OAuth2Error("INVALID_TOKEN", "The access token audience is invalid.", null);
 
     private final String requiredAudience;
 

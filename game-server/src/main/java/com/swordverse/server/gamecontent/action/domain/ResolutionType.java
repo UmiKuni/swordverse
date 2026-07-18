@@ -1,5 +1,3 @@
 package com.swordverse.server.gamecontent.action.domain;
 
-public class ResolutionType {
-    
-}
+public class ResolutionType {}

@@ -1,5 +1,3 @@
 package com.swordverse.server.battle.effect.domain;
 
-public class EffectCharge {
-    
-}
+public class EffectCharge {}

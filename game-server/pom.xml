@@ -22,6 +22,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <maven.compiler.parameters>true</maven.compiler.parameters>
+        <spotless.version>2.46.1</spotless.version>
     </properties>
 
     <dependencies>
@@ -168,6 +169,56 @@
                     </annotationProcessorPaths>
                 </configuration>
             </plugin>
+
+            <plugin>
+              <groupId>com.diffplug.spotless</groupId>
+              <artifactId>spotless-maven-plugin</artifactId>
+              <version>${spotless.version}</version>
+
+              <configuration>
+                  <java>
+                      <googleJavaFormat>
+                          <style>AOSP</style>
+                      </googleJavaFormat>
+
+                      <removeUnusedImports/>
+                      <formatAnnotations/>
+                      <trimTrailingWhitespace/>
+                      <endWithNewline/>
+                  </java>
+
+                  <formats>
+                      <format>
+                          <includes>
+                              <include>**/*.md</include>
+                              <include>**/*.xml</include>
+                              <include>**/*.yml</include>
+                              <include>**/*.yaml</include>
+                              <include>**/*.json</include>
+                              <include>**/.gitignore</include>
+                          </includes>
+
+                          <excludes>
+                              <exclude>target/**</exclude>
+                              <exclude>**/target/**</exclude>
+                          </excludes>
+
+                          <trimTrailingWhitespace/>
+                          <endWithNewline/>
+                      </format>
+                  </formats>
+              </configuration>
+
+              <executions>
+                  <execution>
+                      <id>check-formatting</id>
+                      <phase>verify</phase>
+                      <goals>
+                          <goal>check</goal>
+                      </goals>
+                  </execution>
+              </executions>
+          </plugin>
         </plugins>
     </build>
 </project>

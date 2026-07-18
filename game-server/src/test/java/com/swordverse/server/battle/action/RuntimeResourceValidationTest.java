@@ -1,5 +1,3 @@
 package com.swordverse.server.battle.action;
 
-public class RuntimeResourceValidationTest {
-    
-}
+public class RuntimeResourceValidationTest {}

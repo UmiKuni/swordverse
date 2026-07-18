@@ -1,5 +1,8 @@
 package com.swordverse.server.auth.application;
 
+import com.swordverse.server.auth.persistence.entity.RefreshToken;
+import com.swordverse.server.auth.persistence.entity.Session;
+import com.swordverse.server.auth.persistence.repository.RefreshTokenRepository;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -10,12 +13,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
-
 import org.springframework.stereotype.Service;
-
-import com.swordverse.server.auth.persistence.entity.RefreshToken;
-import com.swordverse.server.auth.persistence.entity.Session;
-import com.swordverse.server.auth.persistence.repository.RefreshTokenRepository;
 
 @Service
 public class RefreshTokenService {
@@ -46,26 +44,20 @@ public class RefreshTokenService {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
 
-            byte[] hashedBytes = digest.digest(
-                    rawToken.getBytes(StandardCharsets.UTF_8));
+            byte[] hashedBytes = digest.digest(rawToken.getBytes(StandardCharsets.UTF_8));
 
-            return Base64.getUrlEncoder()
-                    .withoutPadding()
-                    .encodeToString(hashedBytes);
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(hashedBytes);
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException(exception);
         }
     }
 
-    public String issue(
-            Session session) {
+    public String issue(Session session) {
         String rawToken = generateRawToken();
         String tokenHash = hash(rawToken);
 
-        RefreshToken entity = new RefreshToken(
-                session.getId(),
-                tokenHash,
-                session.getRefreshTokenExpiresAt());
+        RefreshToken entity =
+                new RefreshToken(session.getId(), tokenHash, session.getRefreshTokenExpiresAt());
 
         refreshTokenRepository.save(entity);
 

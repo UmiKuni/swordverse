@@ -7,7 +7,6 @@ public final class TokenReuseDetectedException extends AuthException {
         super(
                 "TOKEN_REUSE_DETECTED",
                 "The refresh token has already been used; the session was revoked.",
-                HttpStatus.UNAUTHORIZED
-        );
+                HttpStatus.UNAUTHORIZED);
     }
 }

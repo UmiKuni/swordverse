@@ -1,14 +1,12 @@
 package com.swordverse.server.auth.persistence.entity;
 
-import java.time.Instant;
-import java.util.Objects;
-import java.util.UUID;
-
 import com.swordverse.server.common.persistence.CreatedEntity;
-
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
+import java.time.Instant;
+import java.util.Objects;
+import java.util.UUID;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;

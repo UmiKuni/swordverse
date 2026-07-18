@@ -1,5 +1,3 @@
 package com.swordverse.server.match.application;
 
-public class MatchPhaseService {
-    
-}
+public class MatchPhaseService {}

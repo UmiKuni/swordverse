@@ -7,6 +7,4 @@ public record AuthSessionResponse(
         long accessTokenExpiresAt,
         long refreshTokenExpiresAt,
         UUID sessionId,
-        AuthUserResponse user
-) {
-}
+        AuthUserResponse user) {}

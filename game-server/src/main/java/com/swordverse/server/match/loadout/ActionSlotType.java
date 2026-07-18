@@ -1,5 +1,3 @@
 package com.swordverse.server.match.loadout;
 
-public class ActionSlotType {
-    
-}
+public class ActionSlotType {}

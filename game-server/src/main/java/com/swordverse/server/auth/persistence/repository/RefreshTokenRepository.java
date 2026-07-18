@@ -1,15 +1,13 @@
 package com.swordverse.server.auth.persistence.repository;
 
+import com.swordverse.server.auth.persistence.entity.RefreshToken;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
-
-import com.swordverse.server.auth.persistence.entity.RefreshToken;
 
 public interface RefreshTokenRepository extends JpaRepository<RefreshToken, UUID> {
     Optional<RefreshToken> findByTokenHash(String tokenHash);

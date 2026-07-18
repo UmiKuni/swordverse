@@ -6,5 +6,4 @@ public record TokenPair(
         String accessToken,
         String refreshToken,
         Instant accessTokenExpiresAt,
-        Instant refreshTokenExpiresAt) {
-}
+        Instant refreshTokenExpiresAt) {}

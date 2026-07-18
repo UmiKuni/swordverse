@@ -1,5 +1,3 @@
 package com.swordverse.server.gamecontent.action.persistence;
 
-public class ActionCostEntity {
-    
-}
+public class ActionCostEntity {}

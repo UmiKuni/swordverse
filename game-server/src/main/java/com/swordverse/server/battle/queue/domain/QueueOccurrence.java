@@ -1,5 +1,3 @@
 package com.swordverse.server.battle.queue.domain;
 
-public class QueueOccurrence {
-    
-}
+public class QueueOccurrence {}

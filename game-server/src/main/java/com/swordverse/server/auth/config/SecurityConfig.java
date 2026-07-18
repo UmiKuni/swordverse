@@ -18,27 +18,30 @@ public class SecurityConfig {
 
     @Bean
     SecurityFilterChain securityFilterChain(
-            HttpSecurity http,
-            RestAuthenticationEntryPoint authenticationEntryPoint
-    ) throws Exception {
-        return http
-                .csrf(csrf -> csrf.disable())
+            HttpSecurity http, RestAuthenticationEntryPoint authenticationEntryPoint)
+            throws Exception {
+        return http.csrf(csrf -> csrf.disable())
                 .cors(Customizer.withDefaults())
-                .sessionManagement(session -> session
-                        .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(authorize -> authorize
-                        .requestMatchers(
-                                "/api/auth/register",
-                                "/api/auth/login",
-                                "/api/auth/refresh",
-                                "/actuator/health"
-                        ).permitAll()
-                        .anyRequest().authenticated())
-                .oauth2ResourceServer(resourceServer -> resourceServer
-                        .jwt(Customizer.withDefaults())
-                        .authenticationEntryPoint(authenticationEntryPoint))
-                .exceptionHandling(exceptions -> exceptions
-                        .authenticationEntryPoint(authenticationEntryPoint))
+                .sessionManagement(
+                        session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(
+                        authorize ->
+                                authorize
+                                        .requestMatchers(
+                                                "/api/auth/register",
+                                                "/api/auth/login",
+                                                "/api/auth/refresh",
+                                                "/actuator/health")
+                                        .permitAll()
+                                        .anyRequest()
+                                        .authenticated())
+                .oauth2ResourceServer(
+                        resourceServer ->
+                                resourceServer
+                                        .jwt(Customizer.withDefaults())
+                                        .authenticationEntryPoint(authenticationEntryPoint))
+                .exceptionHandling(
+                        exceptions -> exceptions.authenticationEntryPoint(authenticationEntryPoint))
                 .httpBasic(httpBasic -> httpBasic.disable())
                 .formLogin(formLogin -> formLogin.disable())
                 .build();

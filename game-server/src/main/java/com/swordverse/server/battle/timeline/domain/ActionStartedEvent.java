@@ -1,5 +1,3 @@
 package com.swordverse.server.battle.timeline.domain;
 
-public class ActionStartedEvent {
-    
-}
+public class ActionStartedEvent {}

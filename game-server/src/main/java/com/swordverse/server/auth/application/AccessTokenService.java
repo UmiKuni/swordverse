@@ -1,18 +1,16 @@
 package com.swordverse.server.auth.application;
 
+import com.swordverse.server.auth.application.model.IssuedAccessToken;
+import com.swordverse.server.common.config.properties.AuthProperties;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
-
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.stereotype.Service;
-
-import com.swordverse.server.auth.application.model.IssuedAccessToken;
-import com.swordverse.server.common.config.properties.AuthProperties;
 
 @Service
 public class AccessTokenService {
@@ -25,15 +23,12 @@ public class AccessTokenService {
     }
 
     public IssuedAccessToken issue(
-        UUID userId,
-        UUID sessionId,
-        Instant issuedAt,
-        Instant maximumExpiresAt
-    ) {
+            UUID userId, UUID sessionId, Instant issuedAt, Instant maximumExpiresAt) {
         Instant requestedExpiresAt = issuedAt.plus(authProperties.accessTokenTtl());
-        Instant expiresAt = requestedExpiresAt.isAfter(maximumExpiresAt)
-                ? maximumExpiresAt
-                : requestedExpiresAt;
+        Instant expiresAt =
+                requestedExpiresAt.isAfter(maximumExpiresAt)
+                        ? maximumExpiresAt
+                        : requestedExpiresAt;
 
         if (!expiresAt.isAfter(issuedAt)) {
             throw new IllegalArgumentException("Access token expiration must be after issuance");
@@ -41,25 +36,22 @@ public class AccessTokenService {
 
         JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).type("JWT").build();
 
-        JwtClaimsSet claims = JwtClaimsSet.builder()
-                .issuer(authProperties.issuer())
-                .subject(userId.toString())
-                .audience(List.of(authProperties.audience()))
-                .issuedAt(issuedAt)
-                .notBefore(issuedAt)
-                .expiresAt(expiresAt)
-                .id(UUID.randomUUID().toString())
-                .claim("userId", userId.toString())
-                .claim("sessionId", sessionId.toString())
-                .build();
-        
-        String tokenValue = jwtEncoder
-                .encode(
-                    JwtEncoderParameters.from(header, claims)
-                )
-                .getTokenValue();
+        JwtClaimsSet claims =
+                JwtClaimsSet.builder()
+                        .issuer(authProperties.issuer())
+                        .subject(userId.toString())
+                        .audience(List.of(authProperties.audience()))
+                        .issuedAt(issuedAt)
+                        .notBefore(issuedAt)
+                        .expiresAt(expiresAt)
+                        .id(UUID.randomUUID().toString())
+                        .claim("userId", userId.toString())
+                        .claim("sessionId", sessionId.toString())
+                        .build();
+
+        String tokenValue =
+                jwtEncoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
 
         return new IssuedAccessToken(tokenValue, expiresAt);
     }
-
 }

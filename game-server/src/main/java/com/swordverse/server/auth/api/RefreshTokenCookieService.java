@@ -1,16 +1,13 @@
 package com.swordverse.server.auth.api;
 
-import java.time.Duration;
+import com.swordverse.server.common.config.properties.AuthProperties;
+import jakarta.servlet.http.HttpServletResponse;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
-
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Component;
-
-import com.swordverse.server.common.config.properties.AuthProperties;
-
-import jakarta.servlet.http.HttpServletResponse;
 
 @Component
 public class RefreshTokenCookieService {
@@ -25,27 +22,19 @@ public class RefreshTokenCookieService {
         this.clock = clock;
     }
 
-    public void write(
-            HttpServletResponse response,
-            String rawRefreshToken,
-            Instant expiresAt
-    ) {
+    public void write(HttpServletResponse response, String rawRefreshToken, Instant expiresAt) {
         Duration maxAge = Duration.between(clock.instant(), expiresAt);
         if (maxAge.isNegative() || maxAge.isZero()) {
             throw new IllegalArgumentException("Refresh token cookie must expire in the future");
         }
 
-        ResponseCookie cookie = baseCookie(rawRefreshToken)
-                .maxAge(maxAge)
-                .build();
+        ResponseCookie cookie = baseCookie(rawRefreshToken).maxAge(maxAge).build();
 
         response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
     }
 
     public void clear(HttpServletResponse response) {
-        ResponseCookie cookie = baseCookie("")
-                .maxAge(Duration.ZERO)
-                .build();
+        ResponseCookie cookie = baseCookie("").maxAge(Duration.ZERO).build();
 
         response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
     }

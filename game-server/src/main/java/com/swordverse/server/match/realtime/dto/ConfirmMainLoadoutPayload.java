@@ -1,5 +1,3 @@
 package com.swordverse.server.match.realtime.dto;
 
-public class ConfirmMainLoadoutPayload {
-    
-}
+public class ConfirmMainLoadoutPayload {}

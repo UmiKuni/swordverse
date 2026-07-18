@@ -8,8 +8,7 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 @ConfigurationPropertiesScan
 public class GameServerApplication {
 
-	public static void main(String[] args) {
-		SpringApplication.run(GameServerApplication.class, args);
-	}
-
+    public static void main(String[] args) {
+        SpringApplication.run(GameServerApplication.class, args);
+    }
 }

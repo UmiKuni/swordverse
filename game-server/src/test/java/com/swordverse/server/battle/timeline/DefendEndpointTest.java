@@ -1,5 +1,3 @@
 package com.swordverse.server.battle.timeline;
 
-public class DefendEndpointTest {
-    
-}
+public class DefendEndpointTest {}

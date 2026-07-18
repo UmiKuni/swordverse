@@ -1,5 +1,3 @@
 package com.swordverse.server.match.application;
 
-public class BattleOrchestrator {
-    
-}
+public class BattleOrchestrator {}

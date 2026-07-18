@@ -1,12 +1,10 @@
 package com.swordverse.server.auth.persistence.entity;
 
-import java.util.Objects;
-
 import com.swordverse.server.common.persistence.AuditedEntity;
-
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
+import java.util.Objects;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -40,13 +38,10 @@ public class User extends AuditedEntity {
     }
 
     private static String checkPasswordHash(String passwordHash) {
-        Objects.requireNonNull(
-                passwordHash,
-                "Password hash must not be null");
+        Objects.requireNonNull(passwordHash, "Password hash must not be null");
 
         if (passwordHash.isBlank()) {
-            throw new IllegalArgumentException(
-                    "Password hash must not be blank");
+            throw new IllegalArgumentException("Password hash must not be blank");
         }
 
         return passwordHash;
@@ -56,13 +51,11 @@ public class User extends AuditedEntity {
         Objects.requireNonNull(username, "Username must not be null");
 
         if (username.isBlank()) {
-            throw new IllegalArgumentException(
-                    "Username must not be blank");
+            throw new IllegalArgumentException("Username must not be blank");
         }
 
         if (username.length() < 3 || username.length() > 50) {
-            throw new IllegalArgumentException(
-                    "Username must contain between 3 and 50 characters");
+            throw new IllegalArgumentException("Username must contain between 3 and 50 characters");
         }
 
         return username;
@@ -74,13 +67,11 @@ public class User extends AuditedEntity {
         }
 
         if (displayName.isBlank()) {
-            throw new IllegalArgumentException(
-                    "Display name must not be blank");
+            throw new IllegalArgumentException("Display name must not be blank");
         }
 
         if (displayName.length() > 100) {
-            throw new IllegalArgumentException(
-                    "Display name must not exceed 100 characters");
+            throw new IllegalArgumentException("Display name must not exceed 100 characters");
         }
 
         return displayName;

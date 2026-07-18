@@ -1,14 +1,12 @@
 package com.swordverse.server.auth.persistence.repository;
 
+import com.swordverse.server.auth.persistence.entity.Session;
 import java.util.Optional;
 import java.util.UUID;
-
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
-
-import com.swordverse.server.auth.persistence.entity.Session;
 
 public interface SessionRepository extends JpaRepository<Session, UUID> {
     @Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
