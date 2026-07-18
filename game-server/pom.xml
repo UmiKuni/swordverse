@@ -37,44 +37,6 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-websocket</artifactId>
         </dependency>
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
-    <modelVersion>4.0.0</modelVersion>
-
-    <parent>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-starter-parent</artifactId>
-        <version>4.1.0</version>
-        <relativePath/>
-    </parent>
-
-    <groupId>com.swordverse</groupId>
-    <artifactId>game-server</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
-    <name>SwordVerse Game Server</name>
-    <description>Server-authoritative REST and STOMP/WebSocket backend for SwordVerse</description>
-
-    <properties>
-        <java.version>17</java.version>
-        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
-        <maven.compiler.parameters>true</maven.compiler.parameters>
-        <spotless.version>2.46.1</spotless.version>
-    </properties>
-
-    <dependencies>
-        <!-- REST API and embedded servlet container -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-webmvc</artifactId>
-        </dependency>
-
-        <!-- STOMP over WebSocket -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-websocket</artifactId>
-        </dependency>
 
         <!-- Jakarta Bean Validation for REST and WebSocket command DTOs -->
         <dependency>
@@ -118,6 +80,13 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!-- Interactive OpenAPI documentation for development -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>3.0.3</version>
         </dependency>
 
         <!-- Type-safe custom application properties -->
@@ -172,11 +141,6 @@
             <artifactId>h2</artifactId>
             <scope>test</scope>
         </dependency>
-        <dependency>
-          <groupId>org.springdoc</groupId>
-          <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-          <version>3.0.3</version>
-        </dependency>
     </dependencies>
 
     <build>
@@ -214,139 +178,48 @@
             </plugin>
 
             <plugin>
-              <groupId>com.diffplug.spotless</groupId>
-              <artifactId>spotless-maven-plugin</artifactId>
-              <version>${spotless.version}</version>
-
-              <configuration>
-                  <java>
-                      <googleJavaFormat>
-                          <style>AOSP</style>
-                      </googleJavaFormat>
-
-                      <removeUnusedImports/>
-                      <formatAnnotations/>
-                      <trimTrailingWhitespace/>
-                      <endWithNewline/>
-                  </java>
-
-                  <formats>
-                      <format>
-                          <includes>
-                              <include>**/*.md</include>
-                              <include>**/*.xml</include>
-                              <include>**/*.yml</include>
-                              <include>**/*.yaml</include>
-                              <include>**/*.json</include>
-                              <include>**/.gitignore</include>
-                          </includes>
-
-                          <excludes>
-                              <exclude>target/**</exclude>
-                              <exclude>**/target/**</exclude>
-                          </excludes>
-
-                          <trimTrailingWhitespace/>
-                          <endWithNewline/>
-                      </format>
-                  </formats>
-              </configuration>
-
-              <executions>
-                  <execution>
-                      <id>check-formatting</id>
-                      <phase>verify</phase>
-                      <goals>
-                          <goal>check</goal>
-                      </goals>
-                  </execution>
-              </executions>
-          </plugin>
-        </plugins>
-    </build>
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-maven-plugin</artifactId>
+                <groupId>com.diffplug.spotless</groupId>
+                <artifactId>spotless-maven-plugin</artifactId>
+                <version>${spotless.version}</version>
                 <configuration>
-                    <excludes>
-                        <exclude>
-                            <groupId>org.projectlombok</groupId>
-                            <artifactId>lombok</artifactId>
-                        </exclude>
-                    </excludes>
+                    <java>
+                        <googleJavaFormat>
+                            <style>AOSP</style>
+                        </googleJavaFormat>
+                        <removeUnusedImports/>
+                        <formatAnnotations/>
+                        <trimTrailingWhitespace/>
+                        <endWithNewline/>
+                    </java>
+                    <formats>
+                        <format>
+                            <includes>
+                                <include>**/*.md</include>
+                                <include>**/*.xml</include>
+                                <include>**/*.yml</include>
+                                <include>**/*.yaml</include>
+                                <include>**/*.json</include>
+                                <include>**/.gitignore</include>
+                            </includes>
+                            <excludes>
+                                <exclude>target/**</exclude>
+                                <exclude>**/target/**</exclude>
+                            </excludes>
+                            <trimTrailingWhitespace/>
+                            <endWithNewline/>
+                        </format>
+                    </formats>
                 </configuration>
+                <executions>
+                    <execution>
+                        <id>check-formatting</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
-
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <configuration>
-                    <release>${java.version}</release>
-                    <parameters>true</parameters>
-                    <annotationProcessorPaths>
-                        <path>
-                            <groupId>org.projectlombok</groupId>
-                            <artifactId>lombok</artifactId>
-                        </path>
-                        <path>
-                            <groupId>org.springframework.boot</groupId>
-                            <artifactId>spring-boot-configuration-processor</artifactId>
-                        </path>
-                    </annotationProcessorPaths>
-                </configuration>
-            </plugin>
-
-            <plugin>
-              <groupId>com.diffplug.spotless</groupId>
-              <artifactId>spotless-maven-plugin</artifactId>
-              <version>${spotless.version}</version>
-
-              <configuration>
-                  <java>
-                      <googleJavaFormat>
-                          <style>AOSP</style>
-                      </googleJavaFormat>
-
-                      <removeUnusedImports/>
-                      <formatAnnotations/>
-                      <trimTrailingWhitespace/>
-                      <endWithNewline/>
-                  </java>
-
-                  <formats>
-                      <format>
-                          <includes>
-                              <include>**/*.md</include>
-                              <include>**/*.xml</include>
-                              <include>**/*.yml</include>
-                              <include>**/*.yaml</include>
-                              <include>**/*.json</include>
-                              <include>**/.gitignore</include>
-                          </includes>
-
-                          <excludes>
-                              <exclude>target/**</exclude>
-                              <exclude>**/target/**</exclude>
-                          </excludes>
-
-                          <trimTrailingWhitespace/>
-                          <endWithNewline/>
-                      </format>
-                  </formats>
-              </configuration>
-
-              <executions>
-                  <execution>
-                      <id>check-formatting</id>
-                      <phase>verify</phase>
-                      <goals>
-                          <goal>check</goal>
-                      </goals>
-                  </execution>
-              </executions>
-          </plugin>
         </plugins>
     </build>
 </project>

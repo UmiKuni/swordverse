@@ -1,18 +1,16 @@
 package com.swordverse.server.common.api;
 
+import com.swordverse.server.common.error.BaseException;
+import com.swordverse.server.common.error.CommonError;
 import java.util.LinkedHashMap;
 import java.util.Map;
-
-import org.springframework.core.annotation.Order;
 import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
-
-import com.swordverse.server.common.error.BaseException;
-import com.swordverse.server.common.error.CommonError;
 
 @Order(Ordered.LOWEST_PRECEDENCE)
 @RestControllerAdvice
@@ -59,8 +57,6 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiErrorResponse> handleIllegalArgument(
             IllegalArgumentException exception) {
         return responseFactory.create(
-                CommonError.VALIDATION_ERROR,
-                exception.getMessage(),
-                Map.of());
+                CommonError.VALIDATION_ERROR, exception.getMessage(), Map.of());
     }
 }
