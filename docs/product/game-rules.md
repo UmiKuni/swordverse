@@ -37,10 +37,11 @@ Each Sect defines:
 
 - Main Sect base Stats.
 - Support Sect bonus Stats.
-- An MP-to-QP conversion ratio when used as the Main Sect.
 - A set of Sect Techniques, normally around five.
 
 Support Sect and Main Sect have the same list of attribute.
+
+Qi generation, Qi limits, and Qi spending are global round rules. They are not defined by a Sect.
 
 ### 3.2 Action source and activation type
 
@@ -82,7 +83,7 @@ Each Action level defines:
 - **Duration** — execution time.
 - **Cooldown** — required waiting time after the Action or its consecutive stack chain ends.
 - **Stack** — maximum number of immediately consecutive uses before cooldown applies.
-- **Costs** — MP, QP, HP, or other configured resources paid for each use.
+- **Costs** — QI, HP, or other configured resources paid for each use.
 
 Time is represented by integer ticks. One tick is `0.1` second.
 
@@ -201,12 +202,10 @@ A selected but locked Action remains in the loadout and can be learned during As
 | `HP` | Health. Reaching 0 satisfies a match-end condition. |
 | `DEF` | Damage reduction used by server calculations. |
 | `AS` | Attack speed that reduces Slash cooldown only. |
-| `MP` | Resource consumed by Actions. |
-| `QP` | Special resource consumed by selected Actions. |
 
-Every Stat has a maximum level of 3. During Ascension, only `HP`, `STR`, `DEF`, and `AS` may be upgraded. `MP` and `QP` are resources and cannot be upgraded during Ascension.
+Every Stat has a maximum level of 3. During Ascension, only `HP`, `STR`, `DEF`, and `AS` may be upgraded.
 
-HP, MP, and QP have current and maximum values:
+HP has current and maximum values:
 
 ```text
 0 <= current <= max
@@ -215,11 +214,43 @@ HP, MP, and QP have current and maximum values:
 Rules:
 
 - Healing cannot increase HP above `hp.max`.
-- MP restoration cannot increase MP above `mp.max`.
-- MP-to-QP conversion cannot increase QP above `qp.max`.
 - Effects may increase or decrease maximum values during a match.
 - When a maximum is reduced below its current value, the current value is clamped to the new maximum.
 - Values cannot fall below 0.
+
+### 5.1 Qi runtime pools
+
+Qi is the only energy resource used by Actions. It is runtime match state, not a character Stat; no Sect grants it, and Ascension cannot upgrade it.
+
+Each player owns two Qi pools:
+
+```text
+roundQi
+reserveQi
+```
+
+Their global limits are:
+
+```text
+0 <= roundQi <= 450
+0 <= reserveQi <= 150
+availableQi = roundQi + reserveQi
+```
+
+`availableQi` is derived runtime state and is not independently persisted.
+
+During Renewal, the server grants Round Qi for the new round:
+
+| Round | Round Qi granted |
+|---:|---:|
+| 1 | 150 |
+| 2 | 250 |
+| 3 | 300 |
+| 4 | 350 |
+| 5 | 400 |
+| 6+ | 450 |
+
+Effects may restore or generate Qi, and every Qi-changing Effect must explicitly target `ROUND_QI` or `RESERVE_QI`. A change is clamped to the target pool's global range; excess Qi is discarded and neither pool may become negative. Effects cannot modify a Qi maximum.
 
 ## 6. Round Structure
 
@@ -238,13 +269,21 @@ Renewal is resolved entirely by the server.
 Resolution order:
 
 1. Resolve active Effects scheduled for `RENEWAL_START`.
-2. Convert remaining MP into QP using the Main Sect's conversion ratio.
-3. Clamp QP to `qp.max`.
-4. Restore MP to `mp.max`.
-5. Resolve active Effects scheduled for `RENEWAL_END`.
-6. Remove expired Effects.
+2. Transfer remaining Round Qi into Reserve Qi:
 
-Different Effects may use different trigger timings. An Effect's duration decreases according to its configured lifecycle after it executes at the relevant timing.
+   ```text
+   transferableQi = min(roundQi, 150 - reserveQi)
+   reserveQi = reserveQi + transferableQi
+   discardedQi = roundQi - transferableQi
+   roundQi = 0
+   ```
+
+3. Grant Round Qi for the new round: `roundQi = roundQiGrantedFor(currentRound)`.
+4. Resolve active Effects scheduled for `RENEWAL_END`.
+5. Clamp `roundQi` and `reserveQi` to their valid ranges.
+6. Remove expired Effects according to the existing Effect lifecycle.
+
+Effects at `RENEWAL_START` may change Qi before the transfer. Effects at `RENEWAL_END` observe the newly granted Round Qi. Any Round Qi that cannot be transferred because Reserve Qi has reached 150 is discarded. An Effect's duration decreases according to its configured lifecycle after it executes at the relevant timing.
 
 ## 8. Ascension
 
@@ -256,7 +295,7 @@ Learning Points may be used to:
 - Learn a selected Action by changing its level from 0 to 1.
 - Upgrade a learned Action, up to level 3.
 
-`MP` and `QP` cannot be upgraded during Ascension.
+Qi cannot be upgraded during Ascension.
 
 Rules:
 
@@ -273,14 +312,14 @@ Rules:
 
 Queue capacity is the maximum timeline duration that a sequence of Actions may occupy, not a required number of Action entries.
 
-| Round | Duration Limit |
-|---:|---:|
-| 1 | 2 seconds |
-| 2 | 3 seconds |
-| 3 | 4 seconds |
-| 4 | 5 seconds |
-| 5 | 6 seconds |
-| 6+ | 7 seconds |
+| Round | Duration | Ticks |
+|---:|---:|---:|
+| 1 | 3 seconds | 30 |
+| 2 | 4 seconds | 40 |
+| 3 | 5 seconds | 50 |
+| 4 | 6 seconds | 60 |
+| 5 | 7 seconds | 70 |
+| 6+ | 8 seconds | 80 |
 
 A queue may use less than the available duration. It is invalid only when its total effective duration exceeds the limit.
 
@@ -327,7 +366,7 @@ Validation checks:
 - The queue satisfies the previous-round removal and retained-order rules.
 - Every occurrence references an eligible Action.
 
-The optional queue check never evaluates MP, QP, HP, or any other Action cost. All resource requirements are checked only against actual state at runtime.
+The optional queue check never evaluates QI, HP, or any other Action cost. All resource requirements are checked only against actual state at runtime.
 
 ### 9.5 Confirmation and timeout
 
@@ -372,10 +411,12 @@ The optional queue check does not inspect costs. Only the runtime check determin
 
 ### 10.3 Action costs
 
-The server checks costs when each Action begins or resolves according to its configured cost timing.
+The server checks costs when each Action begins or resolves according to its configured cost timing. A `QI` cost may use both pools, but the server always spends `roundQi` before `reserveQi`.
 
 - All costs for one Action occurrence are paid atomically.
-- If any required cost cannot be paid, no cost is paid.
+- Before paying a QI cost, the server verifies `roundQi + reserveQi >= requiredQi`.
+- It deducts from `roundQi` first, then deducts any remainder from `reserveQi`.
+- If any required cost cannot be paid, no Qi or other cost belonging to that occurrence is paid.
 - The Action fails with `INSUFFICIENT_RESOURCE`.
 - The invalid occurrence becomes an `EMPTY_SLOT`, and the opponent's timeline continues to resolve.
 

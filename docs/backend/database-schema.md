@@ -86,7 +86,7 @@ Each player selects:
 - One Support Action from the Support Sect
 ```
 
-The Main Sect provides the player’s base stats and MP-to-QP conversion ratio. The Support Sect provides additional stat bonuses and a selected Support Action.
+The Main Sect provides the player’s base stats. The Support Sect provides additional stat bonuses and a selected Support Action. Qi generation and Qi limits are global runtime rules and are not granted by either Sect.
 
 ---
 
@@ -475,7 +475,6 @@ A Sect provides:
 - Main Sect base stats
 - Support Sect bonus stats
 - Available Actions
-- MP-to-QP conversion ratio
 - Display information for the UI
 ```
 
@@ -494,15 +493,10 @@ The term `Sect` replaces the previous term `Order`.
 | `main_base_hp` | `int` |  | No | HP max value granted when this Sect is selected as the Main Sect. |
 | `main_base_def` | `int` |  | No | DEF value granted when this Sect is selected as the Main Sect. |
 | `main_base_as` | `int` |  | No | AS value granted when this Sect is selected as the Main Sect. |
-| `main_base_mp` | `int` |  | No | MP max value granted when this Sect is selected as the Main Sect. |
-| `main_base_qp` | `int` |  | No | QP max value granted when this Sect is selected as the Main Sect. |
 | `support_bonus_str` | `int` |  | No | STR bonus granted when this Sect is selected as the Support Sect. |
 | `support_bonus_hp` | `int` |  | No | HP max bonus granted when this Sect is selected as the Support Sect. |
 | `support_bonus_def` | `int` |  | No | DEF bonus granted when this Sect is selected as the Support Sect. |
 | `support_bonus_as` | `int` |  | No | AS bonus granted when this Sect is selected as the Support Sect. |
-| `support_bonus_mp` | `int` |  | No | MP max bonus granted when this Sect is selected as the Support Sect. |
-| `support_bonus_qp` | `int` |  | No | QP max bonus granted when this Sect is selected as the Support Sect. |
-| `mp_to_qp_ratio` | `numeric(10,2)` |  | No | MP-to-QP conversion ratio used during Renewal when this Sect is selected as the Main Sect. |
 | `created_at` | `timestamptz` |  | No | Timestamp when the Sect record was created. |
 | `updated_at` | `timestamptz` |  | No | Timestamp when the Sect record was last updated. |
 
@@ -523,8 +517,6 @@ CHECK (main_base_str >= 0)
 CHECK (main_base_hp >= 0)
 CHECK (main_base_def >= 0)
 CHECK (main_base_as >= 0)
-CHECK (main_base_mp >= 0)
-CHECK (main_base_qp >= 0)
 ```
 
 ```sql
@@ -532,12 +524,6 @@ CHECK (support_bonus_str >= 0)
 CHECK (support_bonus_hp >= 0)
 CHECK (support_bonus_def >= 0)
 CHECK (support_bonus_as >= 0)
-CHECK (support_bonus_mp >= 0)
-CHECK (support_bonus_qp >= 0)
-```
-
-```sql
-CHECK (mp_to_qp_ratio >= 0)
 ```
 
 #### Relationships
@@ -554,7 +540,7 @@ CHECK (mp_to_qp_ratio >= 0)
 - The database stores `sect_type` as a readable string instead of a PostgreSQL enum to keep future content updates easier.
 - Main Sect stats define the player’s starting combat identity.
 - Support Sect stats are added as bonuses when selected as the Support Sect.
-- `mp_to_qp_ratio` is determined only by the Main Sect.
+- Qi generation and global Qi limits are not Sect data.
 - Runtime stat changes during a match are stored in `match_players`, not in this table.
 
 ---
@@ -845,7 +831,7 @@ UNIQUE (action_level_id, sequence_order)
 ```
 
 ```sql
-CHECK (resource_type IN ('HP', 'MP', 'QP'))
+CHECK (resource_type IN ('HP', 'QI'))
 ```
 
 ```sql
@@ -874,6 +860,7 @@ CHECK (sequence_order >= 0)
 
 - Java maps `resource_type` and `calculation_type` to enums.
 - Costs are paid atomically. If any required cost cannot be paid, no cost is paid and the Action fails.
+- A `QI` cost verifies `round_qi + reserve_qi >= required_qi`, spends `round_qi` first, then spends any remainder from `reserve_qi`.
 - Runtime validation uses `payment_timing`. Advisory queue validation never evaluates or simulates Action costs.
 - The service layer defines whether HP costs are allowed to reduce HP to zero.
 
@@ -962,11 +949,10 @@ Examples:
 ```text
 - Deal damage
 - Heal HP
-- Gain MP
-- Drain QP
+- Restore Round Qi
+- Generate Reserve Qi
 - Apply Bleed
 - Apply Blind
-- Increase max MP
 - Remove a status effect
 ```
 
@@ -1103,7 +1089,6 @@ CHECK (
     'GRANT_TAG',
     'REMOVE_TAG',
     'RESTORE_RESOURCE',
-    'CONVERT_RESOURCE',
     'CUSTOM_EXECUTION'
   )
 )
@@ -1125,8 +1110,7 @@ CHECK (jsonb_typeof(config) = 'object')
 | `REMOVE_EFFECT` | `RemoveEffectConfig` | Effect key or controlled tag filter. |
 | `GRANT_TAG` | `GrantTagConfig` | Valid gameplay tag. |
 | `REMOVE_TAG` | `RemoveTagConfig` | Valid gameplay tag. |
-| `RESTORE_RESOURCE` | `RestoreResourceConfig` | Resource and magnitude. |
-| `CONVERT_RESOURCE` | `ConvertResourceConfig` | Source, target, ratio, and cap rule. |
+| `RESTORE_RESOURCE` | `RestoreResourceConfig` | Resource target and magnitude. Qi targets must be `ROUND_QI` or `RESERVE_QI`. |
 | `CUSTOM_EXECUTION` | `CustomExecutionConfig` | Whitelisted handler key and validated parameters. |
 
 #### Notes
@@ -1134,6 +1118,7 @@ CHECK (jsonb_typeof(config) = 'object')
 - PostgreSQL cannot fully validate every polymorphic JSON shape. Static content is accepted only after `ContentValidator` deserializes every row into its declared Java DTO.
 - Content is compiled into immutable in-memory definitions before matches can start.
 - Unknown component types, unknown fields, missing fields, and unknown handler keys fail application startup or content validation.
+- Effects may restore or generate Qi. Every Qi-changing component explicitly targets `ROUND_QI` or `RESERVE_QI`; the service clamps the result to `0..450` or `0..150` respectively. Effects cannot modify a Qi maximum.
 
 ---
 
@@ -1455,10 +1440,8 @@ Stats and resources are stored directly in this table to provide fast UI renderi
 | `def_value` | `int` |  | No | Current DEF value. |
 | `as_level` | `int` |  | No | Current upgrade level of AS, from 1 through 3. |
 | `as_value` | `int` |  | No | Current AS value. |
-| `mp_current` | `int` |  | No | Current MP value. |
-| `mp_max` | `int` |  | No | Maximum MP value. MP restoration cannot exceed this value. |
-| `qp_current` | `int` |  | No | Current QP value. |
-| `qp_max` | `int` |  | No | Maximum QP value. MP-to-QP conversion cannot exceed this value. |
+| `round_qi` | `int` |  | No | Current Round Qi. Global range: 0 through 450. |
+| `reserve_qi` | `int` |  | No | Current Reserve Qi. Global range: 0 through 150. |
 | `pending_ascension` | `jsonb` |  | Yes | Temporary Ascension allocation submitted by the player before the phase resolves. |
 | `ascension_confirmed` | `boolean` |  | No | Whether the player has confirmed Ascension for the current round. |
 | `action_queue_confirmed` | `boolean` |  | No | Whether the player has confirmed Action Queue for the current round. |
@@ -1511,10 +1494,8 @@ CHECK (hp_current >= 0)
 CHECK (hp_max >= 0)
 CHECK (def_value >= 0)
 CHECK (as_value >= 1)
-CHECK (mp_current >= 0)
-CHECK (mp_max >= 0)
-CHECK (qp_current >= 0)
-CHECK (qp_max >= 0)
+CHECK (round_qi BETWEEN 0 AND 450)
+CHECK (reserve_qi BETWEEN 0 AND 150)
 ```
 
 ```sql
@@ -1526,8 +1507,6 @@ CHECK (as_level BETWEEN 1 AND 3)
 
 ```sql id="sc2jnu"
 CHECK (hp_current <= hp_max)
-CHECK (mp_current <= mp_max)
-CHECK (qp_current <= qp_max)
 ```
 
 ```sql id="fnka12"
@@ -1571,13 +1550,26 @@ ON match_players(user_id);
 - `seat` has no gameplay priority. Battle is simultaneous on a shared 0.1-second timeline.
 - `main_sect_id` and `support_sect_id` are null until the corresponding pre-match selections are resolved.
 - The six selected Actions are stored only in `match_player_action_slots`; Action IDs are not duplicated in this table.
-- Only `HP`, `STR`, `DEF`, and `AS` have Ascension upgrade levels. `MP` and `QP` are resources and have no Ascension level columns.
-- HP, MP, and QP have current and max values.
+- Only `HP`, `STR`, `DEF`, and `AS` have Ascension upgrade levels. Qi is runtime state and has no Ascension level columns.
+- `round_qi` and `reserve_qi` use global limits and are not granted by either Sect.
+- `available_qi` is derived as `round_qi + reserve_qi` and must not be persisted as a column.
 - Healing cannot increase `hp_current` above `hp_max`.
-- MP restoration cannot increase `mp_current` above `mp_max`.
-- MP-to-QP conversion cannot increase `qp_current` above `qp_max`.
+- A `QI` Action cost spends `round_qi` before `reserve_qi`; an insufficient combined balance pays no cost and produces `INSUFFICIENT_RESOURCE`.
 - `pending_ascension` is temporary phase state. It should be cleared after Ascension resolves.
 - The service layer should ensure each match has exactly two match players.
+
+#### Renewal runtime guidance
+
+The service resolves Renewal in this order:
+
+1. Resolve Effects scheduled for `RENEWAL_START`.
+2. Transfer remaining Round Qi into Reserve Qi using `transferableQi = min(round_qi, 150 - reserve_qi)`, then set `reserve_qi = reserve_qi + transferableQi`, `discardedQi = round_qi - transferableQi`, and `round_qi = 0`.
+3. Grant Round Qi for the new round: 150 in round 1, 250 in round 2, 300 in round 3, 350 in round 4, 400 in round 5, and 450 from round 6 onward.
+4. Resolve Effects scheduled for `RENEWAL_END`.
+5. Clamp `round_qi` and `reserve_qi` to their valid ranges.
+6. Remove expired Effects according to the existing Effect lifecycle.
+
+`RENEWAL_START` Effects may change Qi before the transfer. `RENEWAL_END` Effects observe the newly granted Round Qi, and any Round Qi that cannot fit in Reserve Qi is discarded.
 
 ---
 
@@ -1811,7 +1803,7 @@ ON action_queue_entries(match_player_id, round_number);
 - A runtime-invalid occurrence is changed to `EMPTY_RUNTIME`, its `action_slot_id` is cleared, and `runtime_failure_reason` records why. It pays no cost and produces no Action Effects.
 - Runtime conversion to `EMPTY_RUNTIME` must not stop the opponent's timeline.
 - `scheduled_start_tick` and `scheduled_end_tick` preserve deterministic `(start, end]` timing, including after an occurrence becomes `EMPTY_RUNTIME`, so later Actions do not shift. Action duration is never modified by AS. Only Slash cooldown is divided by the player's current AS and rounded down to whole ticks.
-- The service layer enforces the round duration limit: 20 ticks in round 1, then 30, 40, 50, 60, and 70 ticks from round 6 onward.
+- The service layer enforces the round duration limit: 30 ticks in round 1, then 40, 50, 60, 70, and 80 ticks from round 6 onward.
 - After round 1, a valid sequence is derived from the previous confirmed sequence by removing zero or one occurrence, retaining relative order, and inserting new occurrences anywhere. Advisory validation reports violations without blocking confirmation; at runtime, violating occurrences are converted to `EMPTY_RUNTIME` with `QUEUE_TRANSITION_INVALID`.
 
 ---
@@ -1828,7 +1820,7 @@ Examples:
 - Bleed
 - Blind
 - Regeneration
-- Temporary max MP increase
+- Reserve Qi regeneration
 - Defense reduction
 - One-charge Shield
 ```

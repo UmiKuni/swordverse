@@ -10,33 +10,13 @@ The intended experience emphasizes strategic preparation rather than mechanical 
 
 The SwordVerse setting presents five principal sword traditions. Product terminology currently refers to these traditions as **Sects**. Earlier drafts used **Orders**; new rules, contracts, and implementation must use **Sect** unless an accepted product decision changes the term.
 
-### 2.1 True Sword Sect
-
-The True Sword Sect represents disciplined mastery of conventional swordsmanship. Its intended style is balanced, sustainable, resilient, and adaptable.
-
-### 2.2 Divine Sword Sect
-
-The Divine Sword Sect channels righteous power that becomes increasingly effective as combat continues. Its intended style is scaling, forceful, and deliberately vulnerable during preparation.
-
-### 2.3 Demonic Sword Sect
-
-The Demonic Sword Sect exchanges stability and control for explosive destructive potential. Its intended style is aggressive, high-risk, and oriented toward burst damage.
-
-### 2.4 Flying Sword Sect
-
-The Flying Sword Sect emphasizes speed, deception, mobility, and extended combinations. Its intended style is swift, adaptive, and difficult to predict.
-
-### 2.5 Shadow Sword Sect
-
-The Shadow Sword Sect emphasizes precision, misdirection, and calculated evasion. Its intended style is technical and rewards deliberate sequencing.
-
-These descriptions establish thematic direction only. Authoritative statistics, Action definitions, costs, and Effects are defined by static game data and the game rules.
+See more in [Game Components](game-components.md).
 
 ## 3. Core Terminology
 
 ### Sect
 
-A Sect defines a combat identity, base statistics when selected as the Main Sect, support bonuses when selected as the Support Sect, an MP-to-QP conversion ratio, and an associated set of Sect Techniques.
+A Sect defines a combat identity, base statistics when selected as the Main Sect, support bonuses when selected as the Support Sect, and an associated set of Sect Techniques. Qi generation and Qi limits are global round rules; they are not defined by a Sect.
 
 ### Technique
 
@@ -59,5 +39,6 @@ Public matchmaking, ranking, spectators, social systems, chat, replay, shops, an
 ## 5. Related Documents
 
 - [Game rules](game-rules.md)
+- [Game components](game-components.md)
 - [System architecture](../architecture/overview.md)
 - [API and WebSocket contract](../contracts/api-websocket-contract.md)

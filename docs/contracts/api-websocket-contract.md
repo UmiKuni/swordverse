@@ -136,12 +136,12 @@ Queue duration limit:
 
 | Round |  Duration | Ticks |
 | ----: | --------: | ----: |
-|     1 | 2 seconds |    20 |
-|     2 | 3 seconds |    30 |
-|     3 | 4 seconds |    40 |
-|     4 | 5 seconds |    50 |
-|     5 | 6 seconds |    60 |
-|    6+ | 7 seconds |    70 |
+|     1 | 3 seconds |    30 |
+|     2 | 4 seconds |    40 |
+|     3 | 5 seconds |    50 |
+|     4 | 6 seconds |    60 |
+|     5 | 7 seconds |    70 |
+|    6+ | 8 seconds |    80 |
 
 One tick is `0.1` second. Actions occupy `(startTick, endTick]`, and AS does not modify any Action's duration. Only Slash cooldown is divided by `AS` and rounded down to whole ticks. Defend, Shield, and every Sect Technique keep their configured cooldown.
 
@@ -151,20 +151,28 @@ After round 1, at most one retained queue occurrence may be removed. Retained oc
 
 ### 3.3 Runtime resources
 
-HP, MP, and QP have current and maximum values:
+HP has current and maximum values. Qi is global runtime state, not a character Stat; Sects do not grant it and Ascension cannot upgrade it.
 
 ```text
-0 <= current <= max
+0 <= roundQi <= 450
+0 <= reserveQi <= 150
+availableQi = roundQi + reserveQi
 ```
 
-Healing and restoration cannot exceed the current maximum. Effects may modify maximum values during a match.
+`availableQi` is derived and read-only; it is not independently persisted. Action costs use `QI` and may use both pools. Before paying a QI cost, the server verifies `roundQi + reserveQi >= requiredQi`, deducts from `roundQi` first, then deducts any remainder from `reserveQi`. All Action costs are atomic: insufficient combined Qi deducts neither Qi nor any other cost and produces `INSUFFICIENT_RESOURCE` with the existing `EMPTY_SLOT` behavior.
+
+Effects may restore or generate Qi, and every Qi-changing Effect must explicitly target `ROUND_QI` or `RESERVE_QI`. The server clamps the affected pool to `0..450` or `0..150` respectively; excess Qi is discarded and neither pool may become negative. Effects cannot modify a Qi maximum.
 
 During Renewal, the server:
 
 1. Resolves Effects scheduled for `RENEWAL_START`.
-2. Converts remaining MP to QP using the Main Sect ratio without exceeding `qp.max`.
-3. Restores MP to `mp.max`.
+2. Transfers remaining Round Qi into Reserve Qi using `transferableQi = min(roundQi, 150 - reserveQi)`, then sets `reserveQi = reserveQi + transferableQi`, `discardedQi = roundQi - transferableQi`, and `roundQi = 0`.
+3. Grants Round Qi for the new round: 150 in round 1, 250 in round 2, 300 in round 3, 350 in round 4, 400 in round 5, and 450 from round 6 onward.
 4. Resolves Effects scheduled for `RENEWAL_END`.
+5. Clamps `roundQi` and `reserveQi` to their valid ranges.
+6. Removes expired Effects according to the existing Effect lifecycle.
+
+`RENEWAL_START` Effects may change Qi before the transfer, while `RENEWAL_END` Effects observe newly granted Round Qi. Untransferable Round Qi is discarded when Reserve Qi is full.
 
 ### 3.4 Battle
 
@@ -320,19 +328,14 @@ Response `200 OK`:
         "str": 8,
         "hp": 100,
         "def": 4,
-        "as": 5,
-        "mp": 30,
-        "qp": 10
+        "as": 5
       },
       "supportBonusStats": {
         "str": 2,
         "hp": 10,
         "def": 1,
-        "as": 0,
-        "mp": 5,
-        "qp": 0
-      },
-      "mpToQpRatio": 2.0
+        "as": 0
+      }
     }
   ],
   "total": 1
@@ -359,19 +362,14 @@ Response `200 OK`:
     "str": 8,
     "hp": 100,
     "def": 4,
-    "as": 5,
-    "mp": 30,
-    "qp": 10
+    "as": 5
   },
   "supportBonusStats": {
     "str": 2,
     "hp": 10,
     "def": 1,
-    "as": 0,
-    "mp": 5,
-    "qp": 0
+    "as": 0
   },
-  "mpToQpRatio": 2.0,
   "actions": [
     {
       "actionId": "22172357-3371-4aa7-8641-d44b9405db98",
@@ -463,7 +461,7 @@ Response `200 OK`:
       "maxConsecutiveStacks": 1,
       "costs": [
         {
-          "resourceType": "MP",
+          "resourceType": "QI",
           "paymentTiming": "ON_EXECUTION_START",
           "calculationType": "FLAT",
           "value": 8
@@ -583,8 +581,7 @@ Response `200 OK`:
         "def": 5,
         "as": 5,
         "hp": { "current": 92, "max": 110 },
-        "mp": { "current": 30, "max": 35 },
-        "qp": { "current": 6, "max": 10 }
+        "qi": { "roundQi": 250, "reserveQi": 50, "roundMax": 450, "reserveMax": 150, "available": 300 }
       },
       "actionSlots": [
         {
@@ -669,8 +666,7 @@ Response `200 OK`:
       "playerId": "5ab5cf4a-dc55-4130-b8e2-5b7751b091e0",
       "state": {
         "hp": { "current": 18, "max": 110 },
-        "mp": { "current": 22, "max": 35 },
-        "qp": { "current": 9, "max": 10 }
+        "qi": { "roundQi": 0, "reserveQi": 70, "roundMax": 450, "reserveMax": 150, "available": 70 }
       }
     }
   ]
@@ -1052,8 +1048,7 @@ After both confirm, `SUPPORT_LOADOUT_RESOLVED` includes both complete six-slot l
           "def": 5,
           "as": 5,
           "hp": { "current": 110, "max": 110 },
-          "mp": { "current": 35, "max": 35 },
-          "qp": { "current": 0, "max": 10 }
+          "qi": { "roundQi": 0, "reserveQi": 0, "roundMax": 450, "reserveMax": 150, "available": 0 }
         }
       }
     ]
@@ -1119,12 +1114,25 @@ Every phase event contains:
         ]
       }
     ],
-    "players": []
+    "players": [
+      {
+        "playerId": "5ab5cf4a-dc55-4130-b8e2-5b7751b091e0",
+        "qi": { "roundQi": 250, "reserveQi": 150, "roundMax": 450, "reserveMax": 150, "available": 400 },
+        "renewalQi": {
+          "roundQiTransferred": 40,
+          "discardedRoundQi": 10,
+          "roundQiGranted": 250,
+          "effectChanges": [
+            { "target": "ROUND_QI", "before": 40, "change": 10, "after": 50 }
+          ]
+        }
+      }
+    ]
   }
 }
 ```
 
-The server then emits `ASCENSION_STARTED` with `learningPoints: 2`.
+`roundQiTransferred` is the amount moved into Reserve Qi before the new-round grant, and `discardedRoundQi` is the amount that did not fit. `effectChanges` includes Qi changes caused by Renewal Effects. The final `qi` object is authoritative and is emitted after the Renewal order defined in section 3.3. The server then emits `ASCENSION_STARTED` with `learningPoints: 2`.
 
 ### 11.2 Confirm Ascension
 
@@ -1218,7 +1226,7 @@ Private response:
 }
 ```
 
-The check is advisory. It does not persist, confirm, lock, reject, or alter the queue. It reports every detectable non-resource violation, including `DURATION_LIMIT_EXCEEDED`, `COUNTDOWN_INVALID`, `ACTION_NOT_OWNED`, `ACTION_LOCKED`, `ACTION_NOT_QUEUEABLE`, and `QUEUE_TRANSITION_INVALID`. It never checks MP, QP, HP, or any other Action cost.
+The check is advisory. It does not persist, confirm, lock, reject, or alter the queue. It reports every detectable non-resource violation, including `DURATION_LIMIT_EXCEEDED`, `COUNTDOWN_INVALID`, `ACTION_NOT_OWNED`, `ACTION_LOCKED`, `ACTION_NOT_QUEUEABLE`, and `QUEUE_TRANSITION_INVALID`. It never checks QI, HP, or any other Action cost.
 
 AS does not modify Action duration. Only Slash uses AS-adjusted cooldown:
 
@@ -1514,14 +1522,21 @@ export interface CappedValue {
   max: number;
 }
 
+export interface QiState {
+  roundQi: number;
+  reserveQi: number;
+  roundMax: 450;
+  reserveMax: 150;
+  available: number;
+}
+
 export interface PlayerState {
   statLevels: { str: number; hp: number; def: number; as: number };
   str: number;
   def: number;
   as: number;
   hp: CappedValue;
-  mp: CappedValue;
-  qp: CappedValue;
+  qi: QiState;
 }
 
 export interface ActionSummary {
@@ -1636,6 +1651,23 @@ public enum ActionSlotType {
 public enum GameplayActivityType {
     MATCHMAKING, ROOM, MATCH
 }
+
+public record QiState(
+    int roundQi,
+    int reserveQi,
+    int roundMax,
+    int reserveMax,
+    int available
+) {}
+
+public record PlayerState(
+    Map<String, Integer> statLevels,
+    int str,
+    int def,
+    int as,
+    CappedValue hp,
+    QiState qi
+) {}
 
 public record ClaimGameplayPayload(
     GameplayActivityType activityType,
