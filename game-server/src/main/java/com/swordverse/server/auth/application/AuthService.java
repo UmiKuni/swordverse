@@ -2,14 +2,15 @@ package com.swordverse.server.auth.application;
 
 import com.swordverse.server.auth.api.dto.LoginRequestDto;
 import com.swordverse.server.auth.api.dto.RegisterRequestDto;
-import com.swordverse.server.auth.application.exception.AuthException;
-import com.swordverse.server.auth.application.exception.TokenReuseDetectedException;
+import com.swordverse.server.auth.application.error.AuthError;
+import com.swordverse.server.auth.application.error.AuthException;
+import com.swordverse.server.auth.application.error.TokenReuseDetectedException;
 import com.swordverse.server.auth.application.model.AuthSessionResult;
 import com.swordverse.server.auth.application.model.IssuedAccessToken;
 import com.swordverse.server.auth.application.model.TokenPair;
+import com.swordverse.server.auth.domain.SessionStatus;
 import com.swordverse.server.auth.persistence.entity.RefreshToken;
 import com.swordverse.server.auth.persistence.entity.Session;
-import com.swordverse.server.auth.persistence.entity.SessionStatus;
 import com.swordverse.server.auth.persistence.entity.User;
 import com.swordverse.server.auth.persistence.repository.SessionRepository;
 import com.swordverse.server.auth.persistence.repository.UserRepository;
@@ -18,7 +19,6 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -87,8 +87,7 @@ public class AuthService {
     @Transactional(dontRollbackOn = TokenReuseDetectedException.class)
     public AuthSessionResult refresh(String rawRefreshToken) {
         if (rawRefreshToken == null || rawRefreshToken.isBlank()) {
-            throw new AuthException(
-                    "INVALID_TOKEN", "The refresh token is missing.", HttpStatus.UNAUTHORIZED);
+            throw new AuthException(AuthError.INVALID_TOKEN, "The refresh token is missing.");
         }
 
         Instant now = clock.instant();
@@ -98,9 +97,8 @@ public class AuthService {
                         .orElseThrow(
                                 () ->
                                         new AuthException(
-                                                "INVALID_TOKEN",
-                                                "The refresh token is invalid.",
-                                                HttpStatus.UNAUTHORIZED));
+                                                AuthError.INVALID_TOKEN,
+                                                "The refresh token is invalid."));
 
         Session session =
                 sessionRepository
@@ -108,9 +106,8 @@ public class AuthService {
                         .orElseThrow(
                                 () ->
                                         new AuthException(
-                                                "INVALID_TOKEN",
-                                                "The refresh token is not attached to a valid session.",
-                                                HttpStatus.UNAUTHORIZED));
+                                                AuthError.INVALID_TOKEN,
+                                                "The refresh token is not attached to a valid session."));
 
         RefreshToken oldToken =
                 refreshTokenService
@@ -118,9 +115,8 @@ public class AuthService {
                         .orElseThrow(
                                 () ->
                                         new AuthException(
-                                                "INVALID_TOKEN",
-                                                "The refresh token is invalid.",
-                                                HttpStatus.UNAUTHORIZED));
+                                                AuthError.INVALID_TOKEN,
+                                                "The refresh token is invalid."));
 
         if (oldToken.isRevoked()) {
             revokeCompromisedSession(session, now);
@@ -128,8 +124,7 @@ public class AuthService {
         }
 
         if (oldToken.isExpiredAt(now)) {
-            throw new AuthException(
-                    "TOKEN_EXPIRED", "The refresh token has expired.", HttpStatus.UNAUTHORIZED);
+            throw new AuthException(AuthError.TOKEN_EXPIRED, "The refresh token has expired.");
         }
 
         ensureActiveSession(session, now);
@@ -159,9 +154,8 @@ public class AuthService {
                         .orElseThrow(
                                 () ->
                                         new AuthException(
-                                                "SESSION_REVOKED",
-                                                "The session is no longer active.",
-                                                HttpStatus.UNAUTHORIZED));
+                                                AuthError.SESSION_REVOKED,
+                                                "The session is no longer active."));
 
         if (session.getStatus() == SessionStatus.ACTIVE) {
             session.revoke(now);
@@ -207,8 +201,7 @@ public class AuthService {
 
     private void ensureActiveSession(Session session, Instant now) {
         if (!session.isActiveAt(now)) {
-            throw new AuthException(
-                    "SESSION_REVOKED", "The session is no longer active.", HttpStatus.UNAUTHORIZED);
+            throw new AuthException(AuthError.SESSION_REVOKED, "The session is no longer active.");
         }
     }
 
@@ -225,20 +218,16 @@ public class AuthService {
                 .orElseThrow(
                         () ->
                                 new AuthException(
-                                        "UNAUTHORIZED",
-                                        "The authenticated user no longer exists.",
-                                        HttpStatus.UNAUTHORIZED));
+                                        AuthError.UNAUTHORIZED,
+                                        "The authenticated user no longer exists."));
     }
 
     private AuthException invalidCredentials() {
-        return new AuthException(
-                "INVALID_CREDENTIALS", "Invalid username or password.", HttpStatus.UNAUTHORIZED);
+        return new AuthException(AuthError.INVALID_CREDENTIALS, "Invalid username or password.");
     }
 
     private static AuthException usernameAlreadyExists() {
         return new AuthException(
-                "USERNAME_ALREADY_EXISTS",
-                "The username is already registered.",
-                HttpStatus.CONFLICT);
+                AuthError.USERNAME_ALREADY_EXISTS, "The username is already registered.");
     }
 }

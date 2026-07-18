@@ -238,6 +238,8 @@ This section defines the database tables used for authentication, session manage
 
 The authentication model uses short-lived JWT access tokens together with server-side sessions and rotating opaque refresh tokens. The JWT contains `userId` and `sessionId`, but the session state is still validated against the database. The raw refresh token is delivered only in a host-only `HttpOnly` cookie; only its hash is stored. This allows the server to revoke sessions, support logout, and invalidate refresh tokens securely.
 
+A user may own multiple active authentication sessions. This is an intentional product policy and must not be constrained by a unique active-session rule. Authentication sessions do not represent WebSocket presence or gameplay ownership. Exclusive gameplay is enforced separately through the gameplay lease architecture.
+
 ---
 
 ### `users`
@@ -295,7 +297,7 @@ CHECK (length(username) >= 3)
 
 The `sessions` table stores server-side login sessions.
 
-Each successful login creates one session. The access token contains the session ID, and the server checks this table to verify that the session is still active.
+Each successful login creates one session. Existing sessions belonging to the same user remain valid. The access token contains the session ID, and the server checks this table to verify that the referenced session is still active.
 
 This table allows the server to revoke a session even if the JWT access token has not expired yet.
 
@@ -363,6 +365,8 @@ When the server receives an authenticated request, it validates the access token
 - A logout operation should set `status = 'REVOKED'` and `revoked_at = now()`.
 - `session_id` should remain stable during refresh token rotation.
 - Refreshing a token should create a new refresh token record but should not create a new session.
+- Multiple sessions for the same user may have `ACTIVE` status concurrently.
+- Session state must not be used to infer whether the user owns a gameplay lease or currently has an open WebSocket connection.
 
 ---
 

@@ -1,5 +1,6 @@
 package com.swordverse.server.auth.persistence.entity;
 
+import com.swordverse.server.auth.domain.SessionStatus;
 import com.swordverse.server.common.persistence.AuditedEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;

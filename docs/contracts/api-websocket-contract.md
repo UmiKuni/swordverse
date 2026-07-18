@@ -81,8 +81,7 @@ Errors use:
     "message": "The requested Action does not exist.",
     "details": {
       "actionId": "11111111-1111-1111-1111-111111111111"
-    },
-    "traceId": "7e44bb32-e5b2-45d3-b7f8-8c7e6a248890"
+    }
   }
 }
 ```
@@ -135,14 +134,14 @@ An active Action slot may appear multiple times in the same queue. Passive Actio
 
 Queue duration limit:
 
-| Round | Duration | Ticks |
-|---:|---:|---:|
-| 1 | 2 seconds | 20 |
-| 2 | 3 seconds | 30 |
-| 3 | 4 seconds | 40 |
-| 4 | 5 seconds | 50 |
-| 5 | 6 seconds | 60 |
-| 6+ | 7 seconds | 70 |
+| Round |  Duration | Ticks |
+| ----: | --------: | ----: |
+|     1 | 2 seconds |    20 |
+|     2 | 3 seconds |    30 |
+|     3 | 4 seconds |    40 |
+|     4 | 5 seconds |    50 |
+|     5 | 6 seconds |    60 |
+|    6+ | 7 seconds |    70 |
 
 One tick is `0.1` second. Actions occupy `(startTick, endTick]`, and AS does not modify any Action's duration. Only Slash cooldown is divided by `AS` and rounded down to whole ticks. Defend, Shield, and every Sect Technique keep their configured cooldown.
 
@@ -189,6 +188,10 @@ The server issues:
 The access token contains `userId`, `sessionId`, and `exp`. For protected requests, the server verifies the signature and expiration, then requires the referenced session to be active and not revoked.
 
 Only refresh-token hashes are stored. The raw refresh token is never exposed to frontend JavaScript or returned in JSON. A successful refresh reads the cookie, revokes the submitted refresh token, creates a new token for the same session, and replaces the cookie. The cookie uses `Secure` in production, `SameSite=Strict`, and path `/api/auth`.
+
+A user may own multiple active authentication sessions across browsers or devices. Authentication sessions are independent from WebSocket connections and gameplay ownership. A valid session permits authenticated access but does not by itself permit the connection to issue gameplay commands.
+
+Logout revokes only the authenticated session used for the request. Other sessions belonging to the same user remain active unless a separate logout-all operation is introduced.
 
 ### 4.2 Authentication endpoints
 
@@ -501,11 +504,15 @@ Response `201 Created`:
     "userId": "d6968bcb-fb39-48ff-8b6f-813132577c28",
     "username": "hai",
     "ready": false,
-    "connected": true
+    "connected": false
   },
   "playerB": null
 }
 ```
+
+Room creation and gameplay-lease reservation occur atomically. The response reports `connected = false` until an authenticated WebSocket connection successfully claims control of the room activity.
+
+Errors: `GAMEPLAY_ACTIVE_ON_ANOTHER_CONNECTION`.
 
 ### 6.2 Join room
 
@@ -523,7 +530,9 @@ Content-Type: application/json
 
 Response `200 OK`: complete `RoomState`.
 
-Errors: `ROOM_NOT_FOUND`, `ROOM_FULL`, `ROOM_ALREADY_STARTED`, `ALREADY_IN_ROOM`.
+Room membership and gameplay-lease reservation occur atomically. Realtime connection state becomes connected only after the reserved activity is claimed through WebSocket.
+
+Errors: `ROOM_NOT_FOUND`, `ROOM_FULL`, `ROOM_ALREADY_STARTED`, `ALREADY_IN_ROOM`, `GAMEPLAY_ACTIVE_ON_ANOTHER_CONNECTION`.
 
 ### 6.3 Get room
 
@@ -533,6 +542,8 @@ Authorization: Bearer <access-token>
 ```
 
 Response `200 OK`: complete `RoomState`.
+
+This read operation does not acquire or transfer a gameplay lease.
 
 Errors: `ROOM_NOT_FOUND`, `PLAYER_NOT_IN_ROOM`.
 
@@ -692,29 +703,57 @@ The server verifies the JWT and active session, then creates the Spring `Princip
 
 Access-token expiry does not terminate an established connection. Explicit logout or session revocation closes every connection associated with that session.
 
-### 8.2 Destinations
+A user may establish multiple general WebSocket connections. Establishing a connection does not acquire gameplay ownership and disconnecting a general connection does not revoke authentication.
 
-| Direction | Destination | Purpose |
-|---|---|---|
-| Subscribe | `/user/queue/room-events` | Private room results and rejections. |
-| Subscribe | `/user/queue/match-events` | Private match results and rejections. |
-| Subscribe | `/topic/rooms/{roomId}` | Public room events. |
-| Subscribe | `/topic/matches/{matchId}` | Public match events. |
-| Send | `/app/rooms/{roomId}/ready` | Update readiness. |
-| Send | `/app/rooms/{roomId}/leave` | Leave the room. |
-| Send | `/app/rooms/{roomId}/kick` | Host removes Player B. |
-| Send | `/app/rooms/{roomId}/start` | Start the match. |
-| Send | `/app/rooms/{roomId}/request-snapshot` | Request private room snapshot. |
-| Send | `/app/matches/{matchId}/confirm-basic-loadout` | Confirm two of the three Basic Actions. |
-| Send | `/app/matches/{matchId}/confirm-main-loadout` | Confirm Main Sect and three Main Actions. |
-| Send | `/app/matches/{matchId}/confirm-support-loadout` | Confirm Support Sect and Support Action. |
-| Send | `/app/matches/{matchId}/confirm-ascension` | Confirm Ascension allocation. |
-| Send | `/app/matches/{matchId}/check-action-queue` | Preview Action Queue validity without confirming. |
-| Send | `/app/matches/{matchId}/confirm-action-queue` | Confirm Action Queue. |
-| Send | `/app/matches/{matchId}/surrender` | Surrender. |
-| Send | `/app/matches/{matchId}/request-snapshot` | Request private match snapshot. |
+### 8.2 Gameplay lease
 
-### 8.3 Client command envelope
+A user may own at most one gameplay lease. The lease identifies the authenticated user, session, controlling connection, and current `MATCHMAKING`, `ROOM`, or `MATCH` activity.
+
+Room creation and joining are currently HTTP operations. A successful operation atomically reserves the user's gameplay lease for the authenticated session. After the client connects and subscribes, it claims realtime control through:
+
+```text
+/app/gameplay/claim
+```
+
+Payload:
+
+```json
+{
+  "activityType": "ROOM",
+  "activityId": "14dcc51b-a34e-4ad8-96da-e0a22f3f3503"
+}
+```
+
+For matchmaking, `activityId` is omitted until a room or match is assigned. For room or match reconnection, the identifier is required.
+
+Lease acquisition, reservation, claim, transfer, and release are atomic. A connection must own the lease before sending room or match mutation commands. Authentication alone is insufficient. Snapshot requests additionally require ordinary membership authorization but may be allowed during the documented reconnect claim sequence.
+
+If another healthy connection owns the lease, the server rejects the command with `GAMEPLAY_ACTIVE_ON_ANOTHER_CONNECTION`. This is a gameplay ownership conflict, not an authentication failure; the rejected connection remains authenticated.
+
+### 8.3 Destinations
+
+| Direction | Destination                                      | Purpose                                           |
+| --------- | ------------------------------------------------ | ------------------------------------------------- |
+| Subscribe | `/user/queue/room-events`                        | Private room results and rejections.              |
+| Subscribe | `/user/queue/match-events`                       | Private match results and rejections.             |
+| Subscribe | `/topic/rooms/{roomId}`                          | Public room events.                               |
+| Subscribe | `/topic/matches/{matchId}`                       | Public match events.                              |
+| Send      | `/app/gameplay/claim`                            | Claim a reserved or reconnectable gameplay lease. |
+| Send      | `/app/rooms/{roomId}/ready`                      | Update readiness.                                 |
+| Send      | `/app/rooms/{roomId}/leave`                      | Leave the room.                                   |
+| Send      | `/app/rooms/{roomId}/kick`                       | Host removes Player B.                            |
+| Send      | `/app/rooms/{roomId}/start`                      | Start the match.                                  |
+| Send      | `/app/rooms/{roomId}/request-snapshot`           | Request private room snapshot.                    |
+| Send      | `/app/matches/{matchId}/confirm-basic-loadout`   | Confirm two of the three Basic Actions.           |
+| Send      | `/app/matches/{matchId}/confirm-main-loadout`    | Confirm Main Sect and three Main Actions.         |
+| Send      | `/app/matches/{matchId}/confirm-support-loadout` | Confirm Support Sect and Support Action.          |
+| Send      | `/app/matches/{matchId}/confirm-ascension`       | Confirm Ascension allocation.                     |
+| Send      | `/app/matches/{matchId}/check-action-queue`      | Preview Action Queue validity without confirming. |
+| Send      | `/app/matches/{matchId}/confirm-action-queue`    | Confirm Action Queue.                             |
+| Send      | `/app/matches/{matchId}/surrender`               | Surrender.                                        |
+| Send      | `/app/matches/{matchId}/request-snapshot`        | Request private match snapshot.                   |
+
+### 8.4 Client command envelope
 
 ```json
 {
@@ -727,7 +766,7 @@ Access-token expiry does not terminate an established connection. Explicit logou
 
 `commandId` is used for in-process duplicate protection. A client must reuse the same ID only when retrying the same command.
 
-### 8.4 Server event envelope
+### 8.5 Server event envelope
 
 ```json
 {
@@ -1351,6 +1390,8 @@ When both players reach zero HP during the same tick:
 
 A disconnected match player has five minutes to reconnect in any phase. Reconnection must use an active session belonging to the same user. If the deadline expires, the server ends the match with `DISCONNECTED`.
 
+The gameplay lease remains reserved during this five-minute interval. A reconnecting client must subscribe before claiming the lease and requesting a fresh authoritative snapshot. A healthy controlling connection cannot be replaced implicitly.
+
 ### 13.2 Surrender
 
 Destination:
@@ -1371,49 +1412,52 @@ Surrender is valid in every match phase except `GAME_OVER`. It immediately creat
 
 ## 14. Error Codes
 
-| Code | Meaning |
-|---|---|
-| `UNAUTHORIZED` | Authentication is missing or invalid. |
-| `TOKEN_EXPIRED` | Access or refresh token has expired. |
-| `INVALID_TOKEN` | Token signature or value is invalid. |
-| `SESSION_REVOKED` | Server-side session is no longer active. |
-| `TOKEN_REUSE_DETECTED` | A rotated refresh token was reused. |
-| `VALIDATION_ERROR` | Request shape or field value is invalid. |
-| `ROOM_NOT_FOUND` | Room does not exist. |
-| `ROOM_FULL` | Both room slots are occupied. |
-| `ROOM_ALREADY_STARTED` | Room can no longer be changed or joined. |
-| `PLAYER_NOT_IN_ROOM` | Caller is not a room member. |
-| `NOT_ROOM_HOST` | Caller is not Player A. |
-| `PLAYERS_NOT_READY` | Match start requirements are not satisfied. |
-| `PLAYER_DISCONNECTED` | Both players must be connected to start. |
-| `MATCH_NOT_FOUND` | Match does not exist. |
-| `PLAYER_NOT_IN_MATCH` | Caller is not a match player. |
-| `INVALID_MATCH_PHASE` | Command is not valid in the current phase. |
-| `MALFORMED_PAYLOAD` | Command payload does not match its typed DTO. |
-| `SECT_NOT_FOUND` | Sect does not exist. |
-| `ACTION_NOT_FOUND` | Action does not exist. |
-| `ACTION_NOT_IN_SECT` | Action does not belong to the selected Sect. |
-| `BASIC_ACTION_COUNT_INVALID` | Basic loadout does not contain exactly two Actions. |
-| `BASIC_ACTION_INVALID` | Basic selection contains an Action outside Slash, Defend, and Shield. |
-| `MAIN_ACTION_COUNT_INVALID` | Main loadout does not contain exactly three Actions. |
-| `DUPLICATE_ACTION` | A loadout contains the same Action more than once. |
-| `SUPPORT_ACTION_INVALID` | Support Action is not eligible. |
-| `SUPPORT_ACTION_DUPLICATES_MAIN` | Support Action duplicates a selected Main Action. |
-| `ULTIMATE_NOT_ALLOWED_AS_SUPPORT` | Ultimate Actions cannot be selected as Support. |
-| `LEARNING_POINTS_EXCEEDED` | Ascension allocation exceeds 2 LP. |
-| `INVALID_ASCENSION_TARGET` | Ascension target is invalid or ineligible. |
-| `ACTION_LEVEL_MAX` | Action cannot be upgraded further. |
-| `STAT_LEVEL_MAX` | Upgradeable Stat is already level 3. |
-| `DURATION_LIMIT_EXCEEDED` | Advisory/runtime result: an occurrence extends beyond the round duration limit. |
-| `COUNTDOWN_INVALID` | Advisory/runtime result: cooldown or consecutive-stack timing is invalid. |
-| `INSUFFICIENT_RESOURCE` | Runtime result: actual resources cannot pay the Action cost. This is never returned by queue preview validation. |
-| `ACTION_NOT_OWNED` | Advisory/runtime result: Action slot does not belong to the caller. |
-| `ACTION_LOCKED` | Advisory/runtime result: Action has level 0. |
-| `ACTION_NOT_QUEUEABLE` | Advisory/runtime result: submitted Action is not Active. |
-| `QUEUE_TRANSITION_INVALID` | Advisory/runtime result: previous-queue removal or retained-order rule is violated. |
-| `ALREADY_CONFIRMED` | Player already confirmed the phase. |
-| `MATCH_NOT_FINISHED` | Match result is not available. |
-| `INTERNAL_GAMEPLAY_ERROR` | Authoritative engine could not safely resolve gameplay. |
+| Code                              | Meaning                                                                                                          |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `UNAUTHORIZED`                    | Authentication is missing or invalid.                                                                            |
+| `TOKEN_EXPIRED`                   | Access or refresh token has expired.                                                                             |
+| `INVALID_TOKEN`                   | Token signature or value is invalid.                                                                             |
+| `SESSION_REVOKED`                 | Server-side session is no longer active.                                                                         |
+| `TOKEN_REUSE_DETECTED`            | A rotated refresh token was reused.                                                                              |
+| `GAMEPLAY_LEASE_REQUIRED`         | The connection attempted a gameplay command without owning the required gameplay lease.                          |
+| `GAMEPLAY_ACTIVE_ON_ANOTHER_CONNECTION` | Another connection currently owns the user's gameplay lease.                                              |
+| `GAMEPLAY_CONNECTION_REPLACED`    | The connection previously owned gameplay control but an explicit transfer replaced it.                           |
+| `VALIDATION_ERROR`                | Request shape or field value is invalid.                                                                         |
+| `ROOM_NOT_FOUND`                  | Room does not exist.                                                                                             |
+| `ROOM_FULL`                       | Both room slots are occupied.                                                                                    |
+| `ROOM_ALREADY_STARTED`            | Room can no longer be changed or joined.                                                                         |
+| `PLAYER_NOT_IN_ROOM`              | Caller is not a room member.                                                                                     |
+| `NOT_ROOM_HOST`                   | Caller is not Player A.                                                                                          |
+| `PLAYERS_NOT_READY`               | Match start requirements are not satisfied.                                                                      |
+| `PLAYER_DISCONNECTED`             | Both players must be connected to start.                                                                         |
+| `MATCH_NOT_FOUND`                 | Match does not exist.                                                                                            |
+| `PLAYER_NOT_IN_MATCH`             | Caller is not a match player.                                                                                    |
+| `INVALID_MATCH_PHASE`             | Command is not valid in the current phase.                                                                       |
+| `MALFORMED_PAYLOAD`               | Command payload does not match its typed DTO.                                                                    |
+| `SECT_NOT_FOUND`                  | Sect does not exist.                                                                                             |
+| `ACTION_NOT_FOUND`                | Action does not exist.                                                                                           |
+| `ACTION_NOT_IN_SECT`              | Action does not belong to the selected Sect.                                                                     |
+| `BASIC_ACTION_COUNT_INVALID`      | Basic loadout does not contain exactly two Actions.                                                              |
+| `BASIC_ACTION_INVALID`            | Basic selection contains an Action outside Slash, Defend, and Shield.                                            |
+| `MAIN_ACTION_COUNT_INVALID`       | Main loadout does not contain exactly three Actions.                                                             |
+| `DUPLICATE_ACTION`                | A loadout contains the same Action more than once.                                                               |
+| `SUPPORT_ACTION_INVALID`          | Support Action is not eligible.                                                                                  |
+| `SUPPORT_ACTION_DUPLICATES_MAIN`  | Support Action duplicates a selected Main Action.                                                                |
+| `ULTIMATE_NOT_ALLOWED_AS_SUPPORT` | Ultimate Actions cannot be selected as Support.                                                                  |
+| `LEARNING_POINTS_EXCEEDED`        | Ascension allocation exceeds 2 LP.                                                                               |
+| `INVALID_ASCENSION_TARGET`        | Ascension target is invalid or ineligible.                                                                       |
+| `ACTION_LEVEL_MAX`                | Action cannot be upgraded further.                                                                               |
+| `STAT_LEVEL_MAX`                  | Upgradeable Stat is already level 3.                                                                             |
+| `DURATION_LIMIT_EXCEEDED`         | Advisory/runtime result: an occurrence extends beyond the round duration limit.                                  |
+| `COUNTDOWN_INVALID`               | Advisory/runtime result: cooldown or consecutive-stack timing is invalid.                                        |
+| `INSUFFICIENT_RESOURCE`           | Runtime result: actual resources cannot pay the Action cost. This is never returned by queue preview validation. |
+| `ACTION_NOT_OWNED`                | Advisory/runtime result: Action slot does not belong to the caller.                                              |
+| `ACTION_LOCKED`                   | Advisory/runtime result: Action has level 0.                                                                     |
+| `ACTION_NOT_QUEUEABLE`            | Advisory/runtime result: submitted Action is not Active.                                                         |
+| `QUEUE_TRANSITION_INVALID`        | Advisory/runtime result: previous-queue removal or retained-order rule is violated.                              |
+| `ALREADY_CONFIRMED`               | Player already confirmed the phase.                                                                              |
+| `MATCH_NOT_FINISHED`              | Match result is not available.                                                                                   |
+| `INTERNAL_GAMEPLAY_ERROR`         | Authoritative engine could not safely resolve gameplay.                                                          |
 
 Private STOMP rejection:
 
@@ -1435,20 +1479,35 @@ Private STOMP rejection:
 ## 15. TypeScript DTO Reference
 
 ```ts
-export type ActionSource = 'BASIC' | 'SECT_TECHNIQUE';
-export type ActivationType = 'ACTIVE' | 'PASSIVE';
-export type ResolutionType = 'RESOLVE_ON_COMPLETION' | 'ACTIVE_DURING_EXECUTION';
-export type ActionSlotType = 'BASIC_1' | 'BASIC_2' | 'MAIN_1' | 'MAIN_2' | 'MAIN_3' | 'SUPPORT';
+export type ActionSource = "BASIC" | "SECT_TECHNIQUE";
+export type ActivationType = "ACTIVE" | "PASSIVE";
+export type ResolutionType =
+  | "RESOLVE_ON_COMPLETION"
+  | "ACTIVE_DURING_EXECUTION";
+export type ActionSlotType =
+  | "BASIC_1"
+  | "BASIC_2"
+  | "MAIN_1"
+  | "MAIN_2"
+  | "MAIN_3"
+  | "SUPPORT";
 
 export type MatchPhase =
-  | 'PRE_MATCH_BASIC_SELECTION'
-  | 'PRE_MATCH_MAIN_SECT_SELECTION'
-  | 'PRE_MATCH_SUPPORT_SELECTION'
-  | 'RENEWAL'
-  | 'ASCENSION'
-  | 'ACTION_STRATEGY'
-  | 'BATTLE'
-  | 'GAME_OVER';
+  | "PRE_MATCH_BASIC_SELECTION"
+  | "PRE_MATCH_MAIN_SECT_SELECTION"
+  | "PRE_MATCH_SUPPORT_SELECTION"
+  | "RENEWAL"
+  | "ASCENSION"
+  | "ACTION_STRATEGY"
+  | "BATTLE"
+  | "GAME_OVER";
+
+export type GameplayActivityType = "MATCHMAKING" | "ROOM" | "MATCH";
+
+export interface ClaimGameplayPayload {
+  activityType: GameplayActivityType;
+  activityId?: string;
+}
 
 export interface CappedValue {
   current: number;
@@ -1515,12 +1574,12 @@ export interface ConfirmActionQueuePayload {
 export type CheckActionQueuePayload = ConfirmActionQueuePayload;
 
 export type QueueViolationCode =
-  | 'DURATION_LIMIT_EXCEEDED'
-  | 'COUNTDOWN_INVALID'
-  | 'ACTION_NOT_OWNED'
-  | 'ACTION_LOCKED'
-  | 'ACTION_NOT_QUEUEABLE'
-  | 'QUEUE_TRANSITION_INVALID';
+  | "DURATION_LIMIT_EXCEEDED"
+  | "COUNTDOWN_INVALID"
+  | "ACTION_NOT_OWNED"
+  | "ACTION_LOCKED"
+  | "ACTION_NOT_QUEUEABLE"
+  | "QUEUE_TRANSITION_INVALID";
 
 export interface QueueViolation {
   code: QueueViolationCode;
@@ -1573,6 +1632,15 @@ public enum ResolutionType {
 public enum ActionSlotType {
     BASIC_1, BASIC_2, MAIN_1, MAIN_2, MAIN_3, SUPPORT
 }
+
+public enum GameplayActivityType {
+    MATCHMAKING, ROOM, MATCH
+}
+
+public record ClaimGameplayPayload(
+    GameplayActivityType activityType,
+    UUID activityId
+) {}
 
 public record ConfirmBasicLoadoutPayload(
     List<UUID> basicActionIds
@@ -1643,6 +1711,10 @@ Java validation must use typed DTOs and enums. WebSocket handlers obtain the aut
 ## 17. Security and Client-State Rules
 
 - Derive identity exclusively from JWT, active server session, and Spring `Principal`.
+- Permit multiple active authentication sessions and general realtime connections for one user.
+- Require an atomically acquired gameplay lease for matchmaking, room, and match mutation commands.
+- Bind gameplay control to the authenticated `userId`, `sessionId`, and transport `connectionId`; do not accept caller-controlled identity fields as proof of ownership.
+- Treat gameplay lease conflicts as authorization or domain conflicts, not authentication failures. They must not revoke the caller's session.
 - Authorize every room and match read, subscription, and command against membership.
 - Do not reveal secret Basic, Main, or Support selections, Ascension allocations, or queues before their reveal point.
 - Do not expose `behavior_handler`, Effect component config, formulas, or server-only trigger filters.

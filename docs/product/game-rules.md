@@ -19,6 +19,16 @@ The client submits player decisions. The server owns all official validation, ca
 - If Player A leaves while Player B remains, Player B becomes Player A (host).
 - Disconnecting does not immediately remove a player from the room. A disconnected player keeps their slot until they leave, are removed, or the room closes.
 
+### 2.1 Concurrent access and gameplay ownership
+
+- A player account may remain authenticated in multiple browser tabs or devices.
+- Non-gameplay activities, including reading rules, viewing a profile, and reviewing match history, may be used concurrently.
+- A player account may participate in only one active gameplay activity at a time.
+- Gameplay activity begins when the player enters matchmaking, creates or joins a room, or reconnects to an existing room or match.
+- Only one connection may control that gameplay activity at a time.
+- A second authenticated connection does not log the player out. It is prohibited only from issuing gameplay commands while another connection owns gameplay control.
+- A temporary disconnect retains the player's gameplay ownership until the applicable reconnect deadline expires.
+
 ## 3. Sects and Actions
 
 ### 3.1 Sects
