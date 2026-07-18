@@ -1,31 +1,12 @@
 spring:
   config:
     import: optional:file:.env[.properties]
-  application:
-    name: game-server
-
-  profiles:
-    active: dev
-
-  datasource:
-    url: ${SWORDVERSE_DB_URL}
-    username: ${SWORDVERSE_DB_USERNAME}
-    password: ${SWORDVERSE_DB_PASSWORD}
-    driver-class-name: org.postgresql.Driver
 
   jpa:
-    open-in-view: false
-    hibernate:
-      ddl-auto: validate
-    database: postgresql
     show-sql: true
 
-swordverse:
-  auth:
-    issuer: ${SWORDVERSE_AUTH_ISSUER:swordverse}
-    audience: ${SWORDVERSE_AUTH_AUDIENCE:swordverse-game-server}
-    signing-key-base64: ${SWORDVERSE_AUTH_SIGNING_KEY_BASE64}
-    access-token-ttl: ${SWORDVERSE_AUTH_ACCESS_TOKEN_TTL:15m}
-    refresh-token-ttl: ${SWORDVERSE_AUTH_REFRESH_TOKEN_TTL:30d}
-    refresh-cookie-secure: ${SWORDVERSE_AUTH_REFRESH_COOKIE_SECURE:true}
-    refresh-cookie-same-site: ${SWORDVERSE_AUTH_REFRESH_COOKIE_SAME_SITE:Strict}
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true

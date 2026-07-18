@@ -1,0 +1,10 @@
+target/
+.env
+.env.example
+.git/
+.gitignore
+.idea/
+.vscode/
+*.iml
+README.md
+compose.yml

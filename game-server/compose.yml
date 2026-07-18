@@ -1,0 +1,51 @@
+services:
+  database:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${SWORDVERSE_DB_NAME:?SWORDVERSE_DB_NAME is required}
+      POSTGRES_USER: ${SWORDVERSE_DB_USERNAME:?SWORDVERSE_DB_USERNAME is required}
+      POSTGRES_PASSWORD: ${SWORDVERSE_DB_PASSWORD:?SWORDVERSE_DB_PASSWORD is required}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${SWORDVERSE_DB_USERNAME:?SWORDVERSE_DB_USERNAME is required} -d ${SWORDVERSE_DB_NAME:?SWORDVERSE_DB_NAME is required}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+
+      SWORDVERSE_DB_URL: jdbc:postgresql://database:5432/${SWORDVERSE_DB_NAME:?SWORDVERSE_DB_NAME is required}
+      SWORDVERSE_DB_USERNAME: ${SWORDVERSE_DB_USERNAME:?SWORDVERSE_DB_USERNAME is required}
+      SWORDVERSE_DB_PASSWORD: ${SWORDVERSE_DB_PASSWORD:?SWORDVERSE_DB_PASSWORD is required}
+
+      SWORDVERSE_AUTH_ISSUER: ${SWORDVERSE_AUTH_ISSUER:-swordverse}
+      SWORDVERSE_AUTH_AUDIENCE: ${SWORDVERSE_AUTH_AUDIENCE:-swordverse-game-server}
+      SWORDVERSE_AUTH_SIGNING_KEY_BASE64: ${SWORDVERSE_AUTH_SIGNING_KEY_BASE64:?SWORDVERSE_AUTH_SIGNING_KEY_BASE64 is required}
+      SWORDVERSE_AUTH_ACCESS_TOKEN_TTL: ${SWORDVERSE_AUTH_ACCESS_TOKEN_TTL:-15m}
+      SWORDVERSE_AUTH_REFRESH_TOKEN_TTL: ${SWORDVERSE_AUTH_REFRESH_TOKEN_TTL:-30d}
+      SWORDVERSE_AUTH_REFRESH_COOKIE_SECURE: ${SWORDVERSE_AUTH_REFRESH_COOKIE_SECURE:-false}
+      SWORDVERSE_AUTH_REFRESH_COOKIE_SAME_SITE: ${SWORDVERSE_AUTH_REFRESH_COOKIE_SAME_SITE:-Strict}
+
+      SPRINGDOC_API_DOCS_ENABLED: ${SPRINGDOC_API_DOCS_ENABLED:-true}
+      SPRINGDOC_SWAGGER_UI_ENABLED: ${SPRINGDOC_SWAGGER_UI_ENABLED:-true}
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      database:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
