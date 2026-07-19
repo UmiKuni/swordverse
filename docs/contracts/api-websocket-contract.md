@@ -48,10 +48,13 @@ activationType:
 - ACTIVE
 - PASSIVE
 
-resolutionType for Active Actions:
-- RESOLVE_ON_COMPLETION
-- ACTIVE_DURING_EXECUTION
+resolutionTypes for Active Actions: a non-empty array containing up to three distinct values:
+- RESOLVE_ON_START
+- RESOLVE_DURING_EXECUTION
+- RESOLVE_ON_END
 ```
+
+Each Action Effect is assigned to one of the Action's declared resolution types. `RESOLVE_ON_START` resolves at `startTick + 1`, `RESOLVE_DURING_EXECUTION` is active throughout `(startTick, endTick]`, and `RESOLVE_ON_END` resolves at `endTick`. Passive Actions use an empty `resolutionTypes` array.
 
 An Action may additionally have:
 
@@ -378,7 +381,7 @@ Response `200 OK`:
       "description": "A fast sword strike.",
       "actionSource": "SECT_TECHNIQUE",
       "activationType": "ACTIVE",
-      "resolutionType": "RESOLVE_ON_COMPLETION",
+      "resolutionTypes": ["RESOLVE_ON_END"],
       "isUltimate": false,
       "maxLevel": 3
     },
@@ -389,7 +392,7 @@ Response `200 OK`:
       "description": "The Ultimate Action of Heaven Sword.",
       "actionSource": "SECT_TECHNIQUE",
       "activationType": "ACTIVE",
-      "resolutionType": "RESOLVE_ON_COMPLETION",
+      "resolutionTypes": ["RESOLVE_ON_END"],
       "isUltimate": true,
       "maxLevel": 3
     }
@@ -420,7 +423,7 @@ Response `200 OK`:
       "description": "Triggers after three successful hits.",
       "actionSource": "SECT_TECHNIQUE",
       "activationType": "PASSIVE",
-      "resolutionType": null,
+      "resolutionTypes": [],
       "isUltimate": false,
       "maxLevel": 3,
       "sectIds": ["fdb55783-b0d7-4f74-9ac6-6fb587783ac8"]
@@ -449,7 +452,7 @@ Response `200 OK`:
   "description": "A fast sword strike.",
   "actionSource": "SECT_TECHNIQUE",
   "activationType": "ACTIVE",
-  "resolutionType": "RESOLVE_ON_COMPLETION",
+  "resolutionTypes": ["RESOLVE_ON_END"],
   "isUltimate": false,
   "sectIds": ["fdb55783-b0d7-4f74-9ac6-6fb587783ac8"],
   "levels": [
@@ -1289,7 +1292,7 @@ Errors are limited to command-level failures such as `INVALID_MATCH_PHASE`, `MAL
     "actionSlotId": "863cda43-a4bf-4fd9-858a-715cc46fe982",
     "actionId": "737cb9aa-f0c8-4180-a9c8-a94fe9e0de7d",
     "actionKey": "SLASH",
-    "resolutionType": "RESOLVE_ON_COMPLETION",
+    "resolutionTypes": ["RESOLVE_ON_END"],
     "startTick": 0,
     "endTick": 10,
     "effectiveDurationTicks": 10,
@@ -1298,7 +1301,7 @@ Errors are limited to command-level failures such as `INVALID_MATCH_PHASE`, `MAL
 }
 ```
 
-Action duration is never AS-adjusted. For Slash, `effectiveCooldownTicks` includes AS adjustment; other Actions use their configured cooldown unchanged. `ACTIVE_DURING_EXECUTION` Effects remain active for the complete `(startTick, endTick]` interval.
+Action duration is never AS-adjusted. For Slash, `effectiveCooldownTicks` includes AS adjustment; other Actions use their configured cooldown unchanged. `RESOLVE_ON_START` Effects resolve at `startTick + 1`, `RESOLVE_DURING_EXECUTION` Effects remain active for the complete `(startTick, endTick]` interval, and `RESOLVE_ON_END` Effects resolve at `endTick`.
 
 ### 12.2 Timeline point resolved
 
@@ -1490,8 +1493,9 @@ Private STOMP rejection:
 export type ActionSource = "BASIC" | "SECT_TECHNIQUE";
 export type ActivationType = "ACTIVE" | "PASSIVE";
 export type ResolutionType =
-  | "RESOLVE_ON_COMPLETION"
-  | "ACTIVE_DURING_EXECUTION";
+  | "RESOLVE_ON_START"
+  | "RESOLVE_DURING_EXECUTION"
+  | "RESOLVE_ON_END";
 export type ActionSlotType =
   | "BASIC_1"
   | "BASIC_2"
@@ -1546,7 +1550,7 @@ export interface ActionSummary {
   description: string | null;
   actionSource: ActionSource;
   activationType: ActivationType;
-  resolutionType: ResolutionType | null;
+  resolutionTypes: ResolutionType[];
   isUltimate: boolean;
   maxLevel: number;
 }
@@ -1641,7 +1645,7 @@ public enum ActivationType {
 }
 
 public enum ResolutionType {
-    RESOLVE_ON_COMPLETION, ACTIVE_DURING_EXECUTION
+    RESOLVE_ON_START, RESOLVE_DURING_EXECUTION, RESOLVE_ON_END
 }
 
 public enum ActionSlotType {

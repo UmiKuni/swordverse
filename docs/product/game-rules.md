@@ -63,18 +63,23 @@ Only learned Active Actions may be placed in the Action Queue. Passive Actions a
 
 Note that an **Ultimate Action** can only be selected as a Main Technique.
 
-### 3.3 Active Action resolution type
+### 3.3 Active Action resolution types
 
-Every Active Action defines one resolution type:
+Every Active Action defines a non-empty set of one to three resolution types. An Action may use any combination of these types, with no duplicates:
 
 ```text
-RESOLVE_ON_COMPLETION
-ACTIVE_DURING_EXECUTION
+RESOLVE_ON_START
+RESOLVE_DURING_EXECUTION
+RESOLVE_ON_END
 ```
 
-`RESOLVE_ON_COMPLETION` means the Action prepares throughout its duration and applies its configured Effects at the endpoint. For example, the Basic Action Slash occupying `(0.0, 1.0]` deals damage at `1.0`.
+Each configured Effect is assigned to one declared resolution type. Passive Actions have no resolution types.
 
-`ACTIVE_DURING_EXECUTION` means the configured Effects remain active throughout the complete `(start, end]` execution interval. For example, the Basic Action Defend occupying `(0.0, 1.0]` increases DEF throughout that interval, including at `1.0`, and can defend against a Slash that resolves at `1.0`.
+`RESOLVE_ON_START` applies its configured Effects at the first timeline tick after the occurrence starts: `startTick + 1`. For an Action occupying `(0.0, 1.0]`, it resolves at `0.1` seconds.
+
+`RESOLVE_DURING_EXECUTION` keeps its configured Effects active throughout the complete `(start, end]` execution interval. For example, an Action occupying `(0.0, 1.0]` can increase DEF throughout that interval, including at `1.0`.
+
+`RESOLVE_ON_END` applies its configured Effects at the endpoint. For example, an Action occupying `(0.0, 1.0]` resolves at `1.0`.
 
 ### 3.4 Action components
 
@@ -392,7 +397,7 @@ Every Action occupies the interval:
 (start, end]
 ```
 
-The start boundary is excluded and the end boundary is included. Therefore, an `ACTIVE_DURING_EXECUTION` defense remains active when a `RESOLVE_ON_COMPLETION` attack resolves at the same `end` time.
+The start boundary is excluded and the end boundary is included. Therefore, a `RESOLVE_DURING_EXECUTION` defense remains active when a `RESOLVE_ON_END` attack resolves at the same `end` time.
 
 All events scheduled for the same timeline point are resolved by deterministic server rules. Defensive Effects that are active at that point participate in damage resolution.
 

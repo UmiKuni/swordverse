@@ -573,7 +573,7 @@ The game uses one unified `actions` table instead of separate `basic_actions` an
 | `action_key` | `varchar(100)` | Unique | No | Stable application identifier, such as `HEAVENLY_EXECUTION`. |
 | `action_source` | `varchar(20)` |  | No | Source category of the card. |
 | `activation_type` | `varchar(20)` |  | No | Defines whether the card is actively queued or passively triggered. |
-| `resolution_type` | `varchar(40)` |  | Yes | Active Action timing model: resolve at completion or remain active during execution. Null for Passive Actions. |
+| `resolution_types` | `varchar(40)[]` |  | Yes | One to three distinct timing types for an Active Action. Null for Passive Actions. |
 | `is_ultimate` | `boolean` |  | No | Indicates whether this Sect card is an Ultimate Action. |
 | `name` | `varchar(100)` |  | No | Display name of the Action. |
 | `description` | `text` |  | Yes | Description shown to the player. |
@@ -603,9 +603,14 @@ CHECK (activation_type IN ('ACTIVE', 'PASSIVE'))
 
 ```sql
 CHECK (
-  (activation_type = 'ACTIVE' AND resolution_type IN ('RESOLVE_ON_COMPLETION', 'ACTIVE_DURING_EXECUTION'))
+  (
+    activation_type = 'ACTIVE'
+    AND resolution_types IS NOT NULL
+    AND cardinality(resolution_types) BETWEEN 1 AND 3
+    AND resolution_types <@ ARRAY['RESOLVE_ON_START', 'RESOLVE_DURING_EXECUTION', 'RESOLVE_ON_END']::varchar[]
+  )
   OR
-  (activation_type = 'PASSIVE' AND resolution_type IS NULL)
+  (activation_type = 'PASSIVE' AND resolution_types IS NULL)
 )
 ```
 
@@ -623,11 +628,12 @@ CHECK (is_ultimate = false OR action_source = 'SECT_TECHNIQUE')
 
 #### Notes
 
-- `action_source`, `activation_type`, and `resolution_type` are separate classifications. An Ultimate may be active or passive.
+- `action_source`, `activation_type`, and `resolution_types` are separate classifications. An Ultimate may be active or passive.
+- An Active Action has one to three distinct resolution types. The service layer rejects duplicate values and ensures every Action Effect mapping uses a type declared by its Action.
 - Only `ACTIVE` Actions may be added to the Action Queue.
 - `PASSIVE` Actions are evaluated from gameplay events and cannot be queued.
 - The three Basic Action records use stable keys `SLASH`, `DEFEND`, and `SHIELD`. They are not connected to Sects.
-- Slash normally uses `RESOLVE_ON_COMPLETION`; Defend normally uses `ACTIVE_DURING_EXECUTION`; Shield may resolve on completion and create a finite, charge-based Shield Effect.
+- `RESOLVE_ON_START` resolves at `start_tick + 1`; `RESOLVE_DURING_EXECUTION` remains active throughout `(start_tick, end_tick]`; and `RESOLVE_ON_END` resolves at `end_tick`.
 - `action_key` is stable across environments and maps cleanly to Java constants, logs, fixtures, and frontend assets.
 - `behavior_handler` must map to a Java enum and registered Spring handler. A database value must never contain a Java class name or executable script.
 - Standard Actions should use data-driven triggers and Effect components. `behavior_handler` is reserved for exceptional mechanics.
@@ -1175,7 +1181,7 @@ UNIQUE (action_level_id, sequence_order)
 ```
 
 ```sql
-CHECK (activation_phase IN ('ON_EXECUTION_START', 'DURING_EXECUTION', 'ON_ACTION_RESOLVE', 'ON_HIT', 'ON_PASSIVE_TRIGGER'))
+CHECK (activation_phase IN ('RESOLVE_ON_START', 'RESOLVE_DURING_EXECUTION', 'RESOLVE_ON_END', 'ON_HIT', 'ON_PASSIVE_TRIGGER'))
 CHECK (target_selector IN ('SELF', 'OPPONENT', 'BOTH', 'ACTION_SOURCE', 'ACTION_TARGET'))
 CHECK (sequence_order >= 0)
 ```
@@ -1204,7 +1210,7 @@ ON action_effects(effect_definition_id);
 - `sequence_order` controls the order of Effect resolution.
 - Target selection belongs to this mapping so the same reusable Effect can be applied to different targets.
 - Cost payment should be handled before resolving Effects.
-- `RESOLVE_ON_COMPLETION` Actions normally use `ON_ACTION_RESOLVE`. `ACTIVE_DURING_EXECUTION` Actions use `DURING_EXECUTION` for the complete `(start, end]` interval.
+- `RESOLVE_ON_START` mappings resolve at `start_tick + 1`; `RESOLVE_DURING_EXECUTION` mappings apply for the complete `(start, end]` interval; and `RESOLVE_ON_END` mappings resolve at `end_tick`. Each of these mappings must use a resolution type declared by its Action.
 - `stop_on_failure` defines deterministic failure behavior.
 - This table allows the same Effect definition to be reused across multiple Actions and levels.
 - This table supports data-driven Action design without hardcoding every Action’s behavior in server code.
