@@ -94,19 +94,13 @@ Time is represented by integer ticks. One tick is `0.1` second.
 
 AS does not modify Action duration. Every Action uses its configured duration unchanged.
 
-For Slash cooldown only:
-
-```text
-effectiveCooldownTicks = max(0, floor(baseCooldownTicks / AS))
-```
-
-Cooldown is measured in `0.1`-second ticks, so this rounds down to the nearest tick. Defend, Shield, and Main or Support Sect Technique cooldowns are not modified by `AS`.
+`SLASH`, `DEFEND`, and `SHIELD` are Basic Actions with no cooldown. Main and Support Sect Techniques may define cooldowns, measured in `0.1`-second ticks, and AS does not modify them.
 
 ### 3.5 Stack and cooldown
 
 `stack = N` permits at most `N` immediately consecutive occurrences of the same Action. Consecutive stacked occurrences must have no gap between them. Each occurrence pays its own costs.
 
-Cooldown begins at the end of the final occurrence in the consecutive stack chain. The next occurrence must satisfy:
+Basic Actions have unlimited consecutive uses and no cooldown. For an Action with a configured cooldown, cooldown begins at the end of the final occurrence in the consecutive stack chain. The next occurrence must satisfy:
 
 ```text
 nextStart >= stackChainEnd + cooldown
@@ -206,7 +200,7 @@ A selected but locked Action remains in the loadout and can be learned during As
 | `STR` | Offensive power used by server damage calculations. |
 | `HP` | Health. Reaching 0 satisfies a match-end condition. |
 | `DEF` | Damage reduction used by server calculations. |
-| `AS` | Attack speed that reduces Slash cooldown only. |
+| `AS` | Attack speed used by server combat calculations where configured. |
 
 Every Stat has a maximum level of 3. During Ascension, only `HP`, `STR`, `DEF`, and `AS` may be upgraded.
 

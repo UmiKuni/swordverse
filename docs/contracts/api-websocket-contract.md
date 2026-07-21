@@ -148,7 +148,7 @@ Queue duration limit:
 |     7 | 9 seconds |    90 |
 |    8+ | 10 seconds |   100 |
 
-One tick is `0.1` second. Actions occupy `(startTick, endTick]`, and AS does not modify any Action's duration. Only Slash cooldown is divided by `AS` and rounded down to whole ticks. Defend, Shield, and every Sect Technique keep their configured cooldown.
+One tick is `0.1` second. Actions occupy `(startTick, endTick]`, and AS does not modify any Action's duration. `SLASH`, `DEFEND`, and `SHIELD` are Basic Actions with unlimited consecutive uses and no cooldown. Sect Techniques use their configured cooldown unchanged by AS.
 
 Before confirming, the client may request an advisory queue check. It reports duration, cooldown, stack, transition, ownership, level, and activation-type violations. It never checks resource sufficiency and does not confirm, lock, or block the queue.
 
@@ -1235,13 +1235,7 @@ Private response:
 
 The check is advisory. It does not persist, confirm, lock, reject, or alter the queue. It reports every detectable non-resource violation, including `DURATION_LIMIT_EXCEEDED`, `COUNTDOWN_INVALID`, `ACTION_NOT_OWNED`, `ACTION_LOCKED`, `ACTION_NOT_QUEUEABLE`, and `QUEUE_TRANSITION_INVALID`. It never checks QI, HP, or any other Action cost.
 
-AS does not modify Action duration. Only Slash uses AS-adjusted cooldown:
-
-```text
-effectiveCooldownTicks = max(0, floor(baseCooldownTicks / AS))
-```
-
-Defend, Shield, and Sect Technique cooldowns use `baseCooldownTicks` unchanged. Every Action duration uses `baseDurationTicks` unchanged.
+AS does not modify Action duration or cooldown. `SLASH`, `DEFEND`, and `SHIELD` have no cooldown. Sect Techniques use `baseCooldownTicks` unchanged, and every Action duration uses `baseDurationTicks` unchanged.
 
 ### 11.4 Confirm Action Queue
 
@@ -1305,7 +1299,7 @@ Errors are limited to command-level failures such as `INVALID_MATCH_PHASE`, `MAL
 }
 ```
 
-Action duration is never AS-adjusted. For Slash, `effectiveCooldownTicks` includes AS adjustment; other Actions use their configured cooldown unchanged. `RESOLVE_ON_START` Effects resolve at `startTick + 1`, `RESOLVE_DURING_EXECUTION` Effects remain active for the complete `(startTick, endTick]` interval, and `RESOLVE_ON_END` Effects resolve at `endTick`.
+Action duration is never AS-adjusted. Basic Actions have no cooldown; Sect Technique cooldowns use their configured values unchanged. `RESOLVE_ON_START` Effects resolve at `startTick + 1`, `RESOLVE_DURING_EXECUTION` Effects remain active for the complete `(startTick, endTick]` interval, and `RESOLVE_ON_END` Effects resolve at `endTick`.
 
 ### 12.2 Timeline point resolved
 
