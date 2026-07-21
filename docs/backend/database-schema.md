@@ -1124,7 +1124,7 @@ CHECK (jsonb_typeof(config) = 'object')
 - PostgreSQL cannot fully validate every polymorphic JSON shape. Static content is accepted only after `ContentValidator` deserializes every row into its declared Java DTO.
 - Content is compiled into immutable in-memory definitions before matches can start.
 - Unknown component types, unknown fields, missing fields, and unknown handler keys fail application startup or content validation.
-- Effects may restore or generate Qi. Every Qi-changing component explicitly targets `ROUND_QI` or `RESERVE_QI`; the service clamps the result to `0..450` or `0..150` respectively. Effects cannot modify a Qi maximum.
+- Effects may restore or generate Qi. Every Qi-changing component explicitly targets `ROUND_QI` or `RESERVE_QI`; the service clamps the result to `0..550` or `0..150` respectively. Effects cannot modify a Qi maximum.
 
 ---
 
@@ -1446,7 +1446,7 @@ Stats and resources are stored directly in this table to provide fast UI renderi
 | `def_value` | `int` |  | No | Permanent DEF value after Ascension upgrades, before temporary Effect modifiers. |
 | `as_level` | `int` |  | No | Current upgrade level of AS, from 1 through 3. |
 | `as_value` | `int` |  | No | Permanent AS value after Ascension upgrades, before temporary Effect modifiers. |
-| `round_qi` | `int` |  | No | Current Round Qi. Global range: 0 through 450. |
+| `round_qi` | `int` |  | No | Current Round Qi. Global range: 0 through 550. |
 | `reserve_qi` | `int` |  | No | Current Reserve Qi. Global range: 0 through 150. |
 | `pending_ascension` | `jsonb` |  | Yes | Temporary Ascension allocation submitted by the player before the phase resolves. |
 | `ascension_confirmed` | `boolean` |  | No | Whether the player has confirmed Ascension for the current round. |
@@ -1500,7 +1500,7 @@ CHECK (hp_current >= 0)
 CHECK (hp_max >= 0)
 CHECK (def_value >= 0)
 CHECK (as_value >= 1)
-CHECK (round_qi BETWEEN 0 AND 450)
+CHECK (round_qi BETWEEN 0 AND 550)
 CHECK (reserve_qi BETWEEN 0 AND 150)
 ```
 
@@ -1573,7 +1573,7 @@ The service resolves Renewal in this order:
 
 1. Resolve Effects scheduled for `RENEWAL_START`.
 2. Transfer remaining Round Qi into Reserve Qi using `transferableQi = min(round_qi, 150 - reserve_qi)`, then set `reserve_qi = reserve_qi + transferableQi`, `discardedQi = round_qi - transferableQi`, and `round_qi = 0`.
-3. Grant Round Qi for the new round: 150 in round 1, 250 in round 2, 300 in round 3, 350 in round 4, 400 in round 5, and 450 from round 6 onward.
+3. Grant Round Qi for the new round: 150 in round 1, 250 in round 2, 300 in round 3, 350 in round 4, 400 in round 5, 450 in round 6, 500 in round 7, and 550 from round 8 onward.
 4. Resolve Effects scheduled for `RENEWAL_END`.
 5. Clamp `round_qi` and `reserve_qi` to their valid ranges.
 6. Remove expired Effects according to the existing Effect lifecycle.
@@ -1812,7 +1812,7 @@ ON action_queue_entries(match_player_id, round_number);
 - A runtime-invalid occurrence is changed to `EMPTY_RUNTIME`, its `action_slot_id` is cleared, and `runtime_failure_reason` records why. It pays no cost and produces no Action Effects.
 - Runtime conversion to `EMPTY_RUNTIME` must not stop the opponent's timeline.
 - `scheduled_start_tick` and `scheduled_end_tick` preserve deterministic `(start, end]` timing, including after an occurrence becomes `EMPTY_RUNTIME`, so later Actions do not shift. Action duration is never modified by AS. Only Slash cooldown is divided by the player's current AS and rounded down to whole ticks.
-- The service layer enforces the round duration limit: 30 ticks in round 1, then 40, 50, 60, 70, and 80 ticks from round 6 onward.
+- The service layer enforces the round duration limit: 30 ticks in round 1, 40 in round 2, 50 in round 3, 60 in round 4, 70 in round 5, 80 in round 6, 90 in round 7, and 100 from round 8 onward.
 - After round 1, a valid sequence is derived from the previous confirmed sequence by removing zero or one occurrence, retaining relative order, and inserting new occurrences anywhere. Advisory validation reports violations without blocking confirmation; at runtime, violating occurrences are converted to `EMPTY_RUNTIME` with `QUEUE_TRANSITION_INVALID`.
 
 ---

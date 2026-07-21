@@ -237,7 +237,7 @@ reserveQi
 Their global limits are:
 
 ```text
-0 <= roundQi <= 450
+0 <= roundQi <= 550
 0 <= reserveQi <= 150
 availableQi = roundQi + reserveQi
 ```
@@ -253,7 +253,9 @@ During Renewal, the server grants Round Qi for the new round:
 | 3 | 300 |
 | 4 | 350 |
 | 5 | 400 |
-| 6+ | 450 |
+| 6 | 450 |
+| 7 | 500 |
+| 8+ | 550 |
 
 Effects may restore or generate Qi, and every Qi-changing Effect must explicitly target `ROUND_QI` or `RESERVE_QI`. A change is clamped to the target pool's global range; excess Qi is discarded and neither pool may become negative. Effects cannot modify a Qi maximum.
 
@@ -342,7 +344,9 @@ Queue capacity is the maximum timeline duration that a sequence of Actions may o
 | 3 | 5 seconds | 50 |
 | 4 | 6 seconds | 60 |
 | 5 | 7 seconds | 70 |
-| 6+ | 8 seconds | 80 |
+| 6 | 8 seconds | 80 |
+| 7 | 9 seconds | 90 |
+| 8+ | 10 seconds | 100 |
 
 A queue may use less than the available duration. It is invalid only when its total effective duration exceeds the limit.
 

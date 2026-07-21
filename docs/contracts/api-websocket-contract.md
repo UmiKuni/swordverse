@@ -144,7 +144,9 @@ Queue duration limit:
 |     3 | 5 seconds |    50 |
 |     4 | 6 seconds |    60 |
 |     5 | 7 seconds |    70 |
-|    6+ | 8 seconds |    80 |
+|     6 | 8 seconds |    80 |
+|     7 | 9 seconds |    90 |
+|    8+ | 10 seconds |   100 |
 
 One tick is `0.1` second. Actions occupy `(startTick, endTick]`, and AS does not modify any Action's duration. Only Slash cooldown is divided by `AS` and rounded down to whole ticks. Defend, Shield, and every Sect Technique keep their configured cooldown.
 
@@ -157,20 +159,20 @@ After round 1, at most one retained queue occurrence may be removed. Retained oc
 HP has current and maximum values. Qi is global runtime state, not a character Stat; Sects do not grant it and Ascension cannot upgrade it.
 
 ```text
-0 <= roundQi <= 450
+0 <= roundQi <= 550
 0 <= reserveQi <= 150
 availableQi = roundQi + reserveQi
 ```
 
 `availableQi` is derived and read-only; it is not independently persisted. Action costs use `QI` and may use both pools. Before paying a QI cost, the server verifies `roundQi + reserveQi >= requiredQi`, deducts from `roundQi` first, then deducts any remainder from `reserveQi`. All Action costs are atomic: insufficient combined Qi deducts neither Qi nor any other cost and produces `INSUFFICIENT_RESOURCE` with the existing `EMPTY_SLOT` behavior.
 
-Effects may restore or generate Qi, and every Qi-changing Effect must explicitly target `ROUND_QI` or `RESERVE_QI`. The server clamps the affected pool to `0..450` or `0..150` respectively; excess Qi is discarded and neither pool may become negative. Effects cannot modify a Qi maximum.
+Effects may restore or generate Qi, and every Qi-changing Effect must explicitly target `ROUND_QI` or `RESERVE_QI`. The server clamps the affected pool to `0..550` or `0..150` respectively; excess Qi is discarded and neither pool may become negative. Effects cannot modify a Qi maximum.
 
 During Renewal, the server:
 
 1. Resolves Effects scheduled for `RENEWAL_START`.
 2. Transfers remaining Round Qi into Reserve Qi using `transferableQi = min(roundQi, 150 - reserveQi)`, then sets `reserveQi = reserveQi + transferableQi`, `discardedQi = roundQi - transferableQi`, and `roundQi = 0`.
-3. Grants Round Qi for the new round: 150 in round 1, 250 in round 2, 300 in round 3, 350 in round 4, 400 in round 5, and 450 from round 6 onward.
+3. Grants Round Qi for the new round: 150 in round 1, 250 in round 2, 300 in round 3, 350 in round 4, 400 in round 5, 450 in round 6, 500 in round 7, and 550 from round 8 onward.
 4. Resolves Effects scheduled for `RENEWAL_END`.
 5. Clamps `roundQi` and `reserveQi` to their valid ranges.
 6. Removes expired Effects according to the existing Effect lifecycle.
@@ -584,7 +586,7 @@ Response `200 OK`:
         "def": 5,
         "as": 5,
         "hp": { "current": 92, "max": 110 },
-        "qi": { "roundQi": 250, "reserveQi": 50, "roundMax": 450, "reserveMax": 150, "available": 300 }
+        "qi": { "roundQi": 250, "reserveQi": 50, "roundMax": 550, "reserveMax": 150, "available": 300 }
       },
       "actionSlots": [
         {
@@ -669,7 +671,7 @@ Response `200 OK`:
       "playerId": "5ab5cf4a-dc55-4130-b8e2-5b7751b091e0",
       "state": {
         "hp": { "current": 18, "max": 110 },
-        "qi": { "roundQi": 0, "reserveQi": 70, "roundMax": 450, "reserveMax": 150, "available": 70 }
+        "qi": { "roundQi": 0, "reserveQi": 70, "roundMax": 550, "reserveMax": 150, "available": 70 }
       }
     }
   ]
@@ -1051,7 +1053,7 @@ After both confirm, `SUPPORT_LOADOUT_RESOLVED` includes both complete six-slot l
           "def": 5,
           "as": 5,
           "hp": { "current": 110, "max": 110 },
-          "qi": { "roundQi": 0, "reserveQi": 0, "roundMax": 450, "reserveMax": 150, "available": 0 }
+          "qi": { "roundQi": 0, "reserveQi": 0, "roundMax": 550, "reserveMax": 150, "available": 0 }
         }
       }
     ]
@@ -1120,7 +1122,7 @@ Every phase event contains:
     "players": [
       {
         "playerId": "5ab5cf4a-dc55-4130-b8e2-5b7751b091e0",
-        "qi": { "roundQi": 250, "reserveQi": 150, "roundMax": 450, "reserveMax": 150, "available": 400 },
+        "qi": { "roundQi": 250, "reserveQi": 150, "roundMax": 550, "reserveMax": 150, "available": 400 },
         "renewalQi": {
           "roundQiTransferred": 40,
           "discardedRoundQi": 10,
@@ -1531,7 +1533,7 @@ export interface CappedValue {
 export interface QiState {
   roundQi: number;
   reserveQi: number;
-  roundMax: 450;
+  roundMax: 550;
   reserveMax: 150;
   available: number;
 }
