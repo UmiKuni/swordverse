@@ -135,24 +135,13 @@ Only unlocked Actions with `activationType = ACTIVE` are valid executable queue 
 
 An active Action slot may appear multiple times in the same queue. Passive Actions cannot be queued. They activate automatically when their configured gameplay-event conditions are satisfied.
 
-Queue duration limit:
-
-| Round |  Duration | Ticks |
-| ----: | --------: | ----: |
-|     1 | 3 seconds |    30 |
-|     2 | 4 seconds |    40 |
-|     3 | 5 seconds |    50 |
-|     4 | 6 seconds |    60 |
-|     5 | 7 seconds |    70 |
-|     6 | 8 seconds |    80 |
-|     7 | 9 seconds |    90 |
-|    8+ | 10 seconds |   100 |
+An Action Queue has no maximum number of occurrences and no maximum timeline duration. Each Action retains its configured duration, but the complete queue may use any number of ticks.
 
 One tick is `0.1` second. Actions occupy `(startTick, endTick]`, and AS does not modify any Action's duration. `SLASH`, `DEFEND`, and `SHIELD` are Basic Actions with unlimited consecutive uses and no cooldown. Sect Techniques use their configured cooldown unchanged by AS.
 
-Before confirming, the client may request an advisory queue check. It reports duration, cooldown, stack, transition, ownership, level, and activation-type violations. It never checks resource sufficiency and does not confirm, lock, or block the queue.
+Before confirming, the client may request an advisory queue check. It reports cooldown, stack, transition, ownership, level, and activation-type violations. It never checks resource sufficiency and does not confirm, lock, or block the queue.
 
-After round 1, at most one retained queue occurrence may be removed. Retained occurrences keep their relative order; newly selected Actions may be inserted anywhere.
+After round 1, the player may remove zero or one contiguous range of occurrences from the previous confirmed queue. The removed duration must satisfy `removedDurationTicks * 3 <= previousConfirmedQueueDurationTicks`; retained occurrences keep their relative order, and newly selected Actions may be inserted anywhere. `previousConfirmedQueueDurationTicks` is the prior confirmed queue's total duration, not a Queue limit.
 
 ### 3.3 Runtime resources
 
@@ -1210,8 +1199,9 @@ Private response:
   "matchId": "8262bd3a-8ad5-41f8-b6af-918737abe778",
   "payload": {
     "valid": false,
-    "durationLimitTicks": 30,
     "totalDurationTicks": 34,
+    "previousConfirmedQueueDurationTicks": 30,
+    "removedDurationTicks": 12,
     "occurrences": [
       {
         "sequenceIndex": 0,
@@ -1224,16 +1214,16 @@ Private response:
     ],
     "violations": [
       {
-        "code": "DURATION_LIMIT_EXCEEDED",
-        "sequenceIndex": 2,
-        "details": { "durationLimitTicks": 30, "endTick": 34 }
+        "code": "QUEUE_TRANSITION_INVALID",
+        "sequenceIndex": null,
+        "details": { "previousConfirmedQueueDurationTicks": 30, "removedDurationTicks": 12 }
       }
     ]
   }
 }
 ```
 
-The check is advisory. It does not persist, confirm, lock, reject, or alter the queue. It reports every detectable non-resource violation, including `DURATION_LIMIT_EXCEEDED`, `COUNTDOWN_INVALID`, `ACTION_NOT_OWNED`, `ACTION_LOCKED`, `ACTION_NOT_QUEUEABLE`, and `QUEUE_TRANSITION_INVALID`. It never checks QI, HP, or any other Action cost.
+The check is advisory. It does not persist, confirm, lock, reject, or alter the queue. It reports every detectable non-resource violation, including `COUNTDOWN_INVALID`, `ACTION_NOT_OWNED`, `ACTION_LOCKED`, `ACTION_NOT_QUEUEABLE`, and `QUEUE_TRANSITION_INVALID`. It never checks QI, HP, or any other Action cost.
 
 AS does not modify Action duration or cooldown. `SLASH`, `DEFEND`, and `SHIELD` have no cooldown. Sect Techniques use `baseCooldownTicks` unchanged, and every Action duration uses `baseDurationTicks` unchanged.
 
@@ -1260,7 +1250,7 @@ Payload:
 Rules:
 
 - The server stores the submitted sequence without running queue validation.
-- Invalid ownership, level, activation type, duration, cooldown, stack, transition, or resource state does not block confirmation.
+- Invalid ownership, level, activation type, cooldown, stack, transition, or resource state does not block confirmation.
 - The same slot may appear multiple times.
 - Submitting confirms the queue and prevents further edits.
 - At timeout, an unconfirmed player receives an empty queue.
@@ -1341,7 +1331,6 @@ Action duration is never AS-adjusted. Basic Actions have no cooldown; Sect Techn
 Runtime-invalid occurrences use `status = EMPTY_SLOT` and one of these `failureReason` values:
 
 ```text
-DURATION_LIMIT_EXCEEDED
 COUNTDOWN_INVALID
 INSUFFICIENT_RESOURCE
 ACTION_NOT_OWNED
@@ -1457,7 +1446,6 @@ Surrender is valid in every match phase except `GAME_OVER`. It immediately creat
 | `INVALID_ASCENSION_TARGET`        | Ascension target is invalid or ineligible.                                                                       |
 | `ACTION_LEVEL_MAX`                | Action cannot be upgraded further.                                                                               |
 | `STAT_LEVEL_MAX`                  | Upgradeable Stat is already level 3.                                                                             |
-| `DURATION_LIMIT_EXCEEDED`         | Advisory/runtime result: an occurrence extends beyond the round duration limit.                                  |
 | `COUNTDOWN_INVALID`               | Advisory/runtime result: cooldown or consecutive-stack timing is invalid.                                        |
 | `INSUFFICIENT_RESOURCE`           | Runtime result: actual resources cannot pay the Action cost. This is never returned by queue preview validation. |
 | `ACTION_NOT_OWNED`                | Advisory/runtime result: Action slot does not belong to the caller.                                              |
@@ -1591,7 +1579,6 @@ export interface ConfirmActionQueuePayload {
 export type CheckActionQueuePayload = ConfirmActionQueuePayload;
 
 export type QueueViolationCode =
-  | "DURATION_LIMIT_EXCEEDED"
   | "COUNTDOWN_INVALID"
   | "ACTION_NOT_OWNED"
   | "ACTION_LOCKED"
@@ -1606,8 +1593,9 @@ export interface QueueViolation {
 
 export interface ActionQueueCheckResult {
   valid: boolean;
-  durationLimitTicks: number;
   totalDurationTicks: number;
+  previousConfirmedQueueDurationTicks: number | null;
+  removedDurationTicks: number;
   violations: QueueViolation[];
 }
 
@@ -1699,7 +1687,6 @@ public record CheckActionQueuePayload(
 ) {}
 
 public enum QueueViolationCode {
-    DURATION_LIMIT_EXCEEDED,
     COUNTDOWN_INVALID,
     ACTION_NOT_OWNED,
     ACTION_LOCKED,
@@ -1715,8 +1702,9 @@ public record QueueViolation(
 
 public record ActionQueueCheckResult(
     boolean valid,
-    int durationLimitTicks,
     int totalDurationTicks,
+    Integer previousConfirmedQueueDurationTicks,
+    int removedDurationTicks,
     List<QueueViolation> violations
 ) {}
 

@@ -327,22 +327,9 @@ Rules:
 
 ## 9. Action Strategy
 
-### 9.1 Queue duration limit
+### 9.1 Queue length
 
-Queue capacity is the maximum timeline duration that a sequence of Actions may occupy, not a required number of Action entries.
-
-| Round | Duration | Ticks |
-|---:|---:|---:|
-| 1 | 3 seconds | 30 |
-| 2 | 4 seconds | 40 |
-| 3 | 5 seconds | 50 |
-| 4 | 6 seconds | 60 |
-| 5 | 7 seconds | 70 |
-| 6 | 8 seconds | 80 |
-| 7 | 9 seconds | 90 |
-| 8+ | 10 seconds | 100 |
-
-A queue may use less than the available duration. It is invalid only when its total effective duration exceeds the limit.
+An Action Queue has no maximum number of Action occurrences and no maximum timeline duration. An Action's configured duration still determines when its occurrence resolves, but the complete queue may use any number of ticks.
 
 ### 9.2 Eligible Actions
 
@@ -359,15 +346,18 @@ Passive Actions cannot be queued. The same eligible Action slot may be added mul
 The next round's queue is derived from the previous round's confirmed queue:
 
 ```text
-nextQueue = insertNewActions(removeZeroOrOne(previousConfirmedQueue))
+nextQueue = insertNewActions(removeContiguousRange(previousConfirmedQueue))
 ```
 
 Rules:
 
-1. Remove zero or one occurrence from the previous confirmed queue.
-2. Preserve the relative order of all retained occurrences.
-3. Insert newly selected occurrences at the beginning, end, or between retained occurrences.
-4. Check the complete resulting queue against the current round's duration, cooldown, stack, transition, and eligibility rules.
+1. Remove zero or one contiguous range of occurrences from the previous confirmed queue.
+2. The removed range's total effective duration must satisfy `removedDurationTicks * 3 <= previousConfirmedQueueDurationTicks`.
+3. Preserve the relative order of all retained occurrences.
+4. Insert newly selected occurrences at the beginning, end, or between retained occurrences.
+5. Check the complete resulting queue against cooldown, stack, transition, and eligibility rules.
+
+`previousConfirmedQueueDurationTicks` is the total effective duration of the player's confirmed queue in the previous round, not a Queue capacity. In round 1, there is no previous queue and no removal rule.
 
 ### 9.4 Queue validation
 
@@ -376,15 +366,14 @@ Before confirming, a player may request an authoritative preview validation of t
 The server returns whether the queue is valid and all detected violations, including the relevant Action occurrence where possible:
 
 ```text
-DURATION_LIMIT_EXCEEDED
 COUNTDOWN_INVALID
+QUEUE_TRANSITION_INVALID
 ```
 
 Validation checks:
 
-- Total effective duration does not exceed the round's duration limit.
 - Cooldown and consecutive stack rules are satisfied.
-- The queue satisfies the previous-round removal and retained-order rules.
+- The queue satisfies the previous-round contiguous-removal, removal-duration, and retained-order rules.
 - Every occurrence references an eligible Action.
 
 The optional queue check never evaluates QI, HP, or any other Action cost. All resource requirements are checked only against actual state at runtime.

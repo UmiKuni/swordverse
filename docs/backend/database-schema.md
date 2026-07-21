@@ -1689,7 +1689,7 @@ ON match_player_action_slots(action_id);
 
 The `action_queue_entries` table stores a player's submitted Action Queue for a specific round.
 
-Each row represents one ordered Action occurrence. Queue capacity is a timeline duration limit, not an entry-count limit. The same Action slot can appear multiple times in the same queue.
+Each row represents one ordered Action occurrence. An Action Queue has no entry-count or timeline-duration limit. The same Action slot can appear multiple times in the same queue.
 
 The optional queue-check operation is advisory and does not write these rows. Confirmation stores and locks the submitted occurrences without validating or rejecting them. If the player times out, the server uses an empty queue.
 
@@ -1752,7 +1752,6 @@ CHECK (entry_status IN ('SUBMITTED', 'EMPTY_RUNTIME', 'EXECUTED'))
 CHECK (
   runtime_failure_reason IS NULL
   OR runtime_failure_reason IN (
-    'DURATION_LIMIT_EXCEEDED',
     'COUNTDOWN_INVALID',
     'INSUFFICIENT_RESOURCE',
     'ACTION_NOT_OWNED',
@@ -1808,12 +1807,12 @@ ON action_queue_entries(match_player_id, round_number);
 - The same `action_slot_id` may appear multiple times in the same round.
 - Queue confirmation does not run validation and does not reject an invalid queue.
 - Before confirmation, the server may calculate an advisory result containing timing, cooldown, stack, transition, ownership, level, and activation-type violations without persisting or locking the queue. It never checks resource sufficiency.
-- At runtime, the service layer checks ownership, Action level, activation type, timeline duration, cooldown, consecutive stack, costs, disabled state, and other execution requirements.
+- At runtime, the service layer checks ownership, Action level, activation type, cooldown, consecutive stack, costs, disabled state, and other execution requirements.
 - A runtime-invalid occurrence is changed to `EMPTY_RUNTIME`, its `action_slot_id` is cleared, and `runtime_failure_reason` records why. It pays no cost and produces no Action Effects.
 - Runtime conversion to `EMPTY_RUNTIME` must not stop the opponent's timeline.
 - `scheduled_start_tick` and `scheduled_end_tick` preserve deterministic `(start, end]` timing, including after an occurrence becomes `EMPTY_RUNTIME`, so later Actions do not shift. Action duration and cooldown are never modified by AS. Basic Actions have no cooldown; Sect Techniques use their configured cooldown unchanged.
-- The service layer enforces the round duration limit: 30 ticks in round 1, 40 in round 2, 50 in round 3, 60 in round 4, 70 in round 5, 80 in round 6, 90 in round 7, and 100 from round 8 onward.
-- After round 1, a valid sequence is derived from the previous confirmed sequence by removing zero or one occurrence, retaining relative order, and inserting new occurrences anywhere. Advisory validation reports violations without blocking confirmation; at runtime, violating occurrences are converted to `EMPTY_RUNTIME` with `QUEUE_TRANSITION_INVALID`.
+- The service layer does not enforce an Action Queue entry-count or timeline-duration limit.
+- After round 1, a valid sequence is derived from the previous confirmed sequence by removing zero or one contiguous range, retaining the relative order of all remaining occurrences, and inserting new occurrences anywhere. The removed range must satisfy `removed_duration_ticks * 3 <= previous_confirmed_queue_duration_ticks`; this previous duration is the prior queue's total duration, not a capacity. Advisory validation reports violations without blocking confirmation; at runtime, violating occurrences are converted to `EMPTY_RUNTIME` with `QUEUE_TRANSITION_INVALID`.
 
 ---
 
