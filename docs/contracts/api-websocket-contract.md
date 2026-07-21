@@ -1169,6 +1169,8 @@ Rules:
 - Total allocation is between 0 and 2 LP.
 - Stat targets are limited to `HP`, `STR`, `DEF`, and `AS`.
 - Stats and Actions have a maximum level of 3.
+- Each `STAT` upgrade permanently increases the selected unmodified integer Stat value by 10%. The increase is cumulative, calculated before temporary Effect modifiers, and rounded up: `increase = ceil(statValue * 0.10)`.
+- For `HP`, calculate the rounded-up 10% increase from the previous maximum, add it to `hp.max`, and heal `hp.current` by that same amount without exceeding the new maximum.
 - Level `0 -> 1` learns the Action.
 - Level `1+` upgrades the Action.
 - Unspent LP is forfeited.

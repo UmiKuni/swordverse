@@ -125,7 +125,7 @@ current_level = 0  -> locked
 current_level >= 1 -> unlocked
 ```
 
-Selected Basic Actions start at level 1. Actions and upgradeable Stats have a maximum level of 3. Ascension may upgrade Actions and only the `HP`, `STR`, `DEF`, and `AS` Stats.
+Selected Basic Actions start at level 1. Actions and upgradeable Stats have a maximum level of 3. Ascension may upgrade Actions and only the `HP`, `STR`, `DEF`, and `AS` Stats. Each Stat upgrade permanently increases the unmodified player Stat by 10%; upgrades are cumulative, temporary Effect modifiers are applied separately, and the increase is rounded up to an integer.
 
 ---
 
@@ -1438,14 +1438,14 @@ Stats and resources are stored directly in this table to provide fast UI renderi
 | `main_sect_id` | `uuid` | FK | Yes | Main Sect selected by the player. References `sects.id`. |
 | `support_sect_id` | `uuid` | FK | Yes | Support Sect selected by the player. References `sects.id`. |
 | `str_level` | `int` |  | No | Current upgrade level of STR, from 1 through 3. |
-| `str_value` | `int` |  | No | Current STR value. |
+| `str_value` | `int` |  | No | Permanent STR value after Ascension upgrades, before temporary Effect modifiers. |
 | `hp_level` | `int` |  | No | Current upgrade level of HP, from 1 through 3. |
 | `hp_current` | `int` |  | No | Current HP value. |
-| `hp_max` | `int` |  | No | Maximum HP value. Healing cannot exceed this value. |
+| `hp_max` | `int` |  | No | Permanent HP maximum after Ascension upgrades, before temporary Effect modifiers. Healing cannot exceed this value. |
 | `def_level` | `int` |  | No | Current upgrade level of DEF, from 1 through 3. |
-| `def_value` | `int` |  | No | Current DEF value. |
+| `def_value` | `int` |  | No | Permanent DEF value after Ascension upgrades, before temporary Effect modifiers. |
 | `as_level` | `int` |  | No | Current upgrade level of AS, from 1 through 3. |
-| `as_value` | `int` |  | No | Current AS value. |
+| `as_value` | `int` |  | No | Permanent AS value after Ascension upgrades, before temporary Effect modifiers. |
 | `round_qi` | `int` |  | No | Current Round Qi. Global range: 0 through 450. |
 | `reserve_qi` | `int` |  | No | Current Reserve Qi. Global range: 0 through 150. |
 | `pending_ascension` | `jsonb` |  | Yes | Temporary Ascension allocation submitted by the player before the phase resolves. |
@@ -1557,6 +1557,9 @@ ON match_players(user_id);
 - `main_sect_id` and `support_sect_id` are null until the corresponding pre-match selections are resolved.
 - The six selected Actions are stored only in `match_player_action_slots`; Action IDs are not duplicated in this table.
 - Only `HP`, `STR`, `DEF`, and `AS` have Ascension upgrade levels. Qi is runtime state and has no Ascension level columns.
+- Each Stat upgrade permanently increases the stored unmodified integer Stat value by 10%; two upgrades are cumulative because the second uses the first upgraded value. The server calculates `increase = ceil(stat_value * 0.10)`.
+- For an HP upgrade, `increase = ceil(hp_max * 0.10)`, `hp_max = hp_max + increase`, and `hp_current = min(hp_current + increase, hp_max)`. This immediately heals the player by the HP increase.
+- Temporary Effect modifiers are applied by the service layer and do not alter the permanent Ascension value.
 - `round_qi` and `reserve_qi` use global limits and are not granted by either Sect.
 - `available_qi` is derived as `round_qi + reserve_qi` and must not be persisted as a column.
 - Healing cannot increase `hp_current` above `hp_max`.

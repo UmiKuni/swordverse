@@ -302,6 +302,24 @@ Learning Points may be used to:
 
 Qi cannot be upgraded during Ascension.
 
+Each Stat upgrade permanently increases that Stat's unmodified player value by 10%. The increase is cumulative: each upgrade uses the value produced by the previous permanent upgrade, before temporary Effect modifiers are applied.
+
+```text
+increase = ceil(permanentStatValue * 0.10)
+permanentStatValue = permanentStatValue + increase
+```
+
+Stat values are always integers, so every 10% increase is rounded up to the next integer.
+
+For an HP upgrade, calculate the rounded-up increase from the previous `hp.max`, then apply it to both values:
+
+```text
+hp.max = hp.max + increase
+hp.current = min(hp.current + increase, hp.max)
+```
+
+The `hp.current` increase is an immediate heal equal to the HP maximum increase.
+
 Rules:
 
 - A player may spend between 0 and 2 LP.
