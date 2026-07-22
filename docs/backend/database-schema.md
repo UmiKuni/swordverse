@@ -125,7 +125,7 @@ current_level = 0  -> locked
 current_level >= 1 -> unlocked
 ```
 
-Selected Basic Actions start at level 1. Actions and upgradeable Stats have a maximum level of 3. Ascension may upgrade Actions and only the `HP`, `STR`, `DEF`, and `AS` Stats. Each Stat upgrade permanently increases the unmodified player Stat by 10%; upgrades are cumulative, temporary Effect modifiers are applied separately, and the increase is rounded up to an integer.
+Selected Basic Actions start at level 1. Actions and upgradeable Stats have a maximum level of 3. Ascension may upgrade Actions and only the `HP`, `STR`, `DEF`, and `AS` Stats. Each Stat upgrade permanently increases the unmodified player Stat by 10%; upgrades are cumulative and temporary Effect modifiers are applied separately. `HP`, `STR`, and `DEF` increases are rounded up to an integer; `AS` increases are rounded up to two decimal places.
 
 ---
 
@@ -492,11 +492,11 @@ The term `Sect` replaces the previous term `Order`.
 | `main_base_str` | `int` |  | No | STR value granted when this Sect is selected as the Main Sect. |
 | `main_base_hp` | `int` |  | No | HP max value granted when this Sect is selected as the Main Sect. |
 | `main_base_def` | `int` |  | No | DEF value granted when this Sect is selected as the Main Sect. |
-| `main_base_as` | `int` |  | No | AS value granted when this Sect is selected as the Main Sect. |
+| `main_base_as` | `numeric(10,2)` |  | No | AS value granted when this Sect is selected as the Main Sect. |
 | `support_bonus_str` | `int` |  | No | STR bonus granted when this Sect is selected as the Support Sect. |
 | `support_bonus_hp` | `int` |  | No | HP max bonus granted when this Sect is selected as the Support Sect. |
 | `support_bonus_def` | `int` |  | No | DEF bonus granted when this Sect is selected as the Support Sect. |
-| `support_bonus_as` | `int` |  | No | AS bonus granted when this Sect is selected as the Support Sect. |
+| `support_bonus_as` | `numeric(10,2)` |  | No | AS bonus granted when this Sect is selected as the Support Sect. |
 | `created_at` | `timestamptz` |  | No | Timestamp when the Sect record was created. |
 | `updated_at` | `timestamptz` |  | No | Timestamp when the Sect record was last updated. |
 
@@ -1445,7 +1445,7 @@ Stats and resources are stored directly in this table to provide fast UI renderi
 | `def_level` | `int` |  | No | Current upgrade level of DEF, from 1 through 3. |
 | `def_value` | `int` |  | No | Permanent DEF value after Ascension upgrades, before temporary Effect modifiers. |
 | `as_level` | `int` |  | No | Current upgrade level of AS, from 1 through 3. |
-| `as_value` | `int` |  | No | Permanent AS value after Ascension upgrades, before temporary Effect modifiers. |
+| `as_value` | `numeric(10,2)` |  | No | Permanent AS value after Ascension upgrades, before temporary Effect modifiers. |
 | `round_qi` | `int` |  | No | Current Round Qi. Global range: 0 through 550. |
 | `reserve_qi` | `int` |  | No | Current Reserve Qi. Global range: 0 through 150. |
 | `pending_ascension` | `jsonb` |  | Yes | Temporary Ascension allocation submitted by the player before the phase resolves. |
@@ -1557,7 +1557,7 @@ ON match_players(user_id);
 - `main_sect_id` and `support_sect_id` are null until the corresponding pre-match selections are resolved.
 - The six selected Actions are stored only in `match_player_action_slots`; Action IDs are not duplicated in this table.
 - Only `HP`, `STR`, `DEF`, and `AS` have Ascension upgrade levels. Qi is runtime state and has no Ascension level columns.
-- Each Stat upgrade permanently increases the stored unmodified integer Stat value by 10%; two upgrades are cumulative because the second uses the first upgraded value. The server calculates `increase = ceil(stat_value * 0.10)`.
+- `HP`, `STR`, and `DEF` permanently increase as integers by 10%; two upgrades are cumulative because the second uses the first upgraded value. The server calculates `increase = ceil(stat_value * 0.10)`. `AS` is `numeric(10,2)` and uses `increase = ceil(as_value * 0.10 * 100) / 100`.
 - For an HP upgrade, `increase = ceil(hp_max * 0.10)`, `hp_max = hp_max + increase`, and `hp_current = min(hp_current + increase, hp_max)`. This immediately heals the player by the HP increase.
 - Temporary Effect modifiers are applied by the service layer and do not alter the permanent Ascension value.
 - `round_qi` and `reserve_qi` use global limits and are not granted by either Sect.

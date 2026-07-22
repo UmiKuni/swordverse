@@ -2,9 +2,9 @@
 ## 3 BASIC ACTIONS
 Basic Actions have infinite Stack and no Cooldown.
 ### Slash
-**- Cost:** 40
+**- Cost:** 40 | **Activation type:** Active
 
-**- Duration:** 1/AS(Attack Speed) seconds
+**- Duration:** 1/AS(Attack Speed) seconds 
 
 **- Description:** Deal (100% x STR) damage to the target.
 
@@ -12,7 +12,7 @@ Basic Actions have infinite Stack and no Cooldown.
 `RESOLVE_ON_END`: **Deal** (100% x STR) damage.
 
 ### Defend
-**- Cost:** 20
+**- Cost:** 20 | **Activation type:** Active
 
 **- Duration:** 1/AS(Attack Speed) seconds
 
@@ -22,7 +22,7 @@ Basic Actions have infinite Stack and no Cooldown.
 `RESOLVE_ON_END`: Ignore all upcoming **Slash**.
 
 ### Shield
-**- Cost:** 60
+**- Cost:** 60 | **Activation type:** Active
 
 **- Duration:** 1 seconds
 
@@ -163,10 +163,10 @@ Basic Actions have infinite Stack and no Cooldown.
 
 **- Duration:** (**X** x 0.3)s | **Cooldown:** 3s | **Stack:** 1
 
-**- Description:** Converge the flying swords into an unbroken stream, then unleash a relentless assault that deals (45%/55%/70% x STR) damage with **X**(4 x AS rounded up) strikes. Each strike will apply 1 **Bleed** to the target.
+**- Description:** Converge the flying swords into an unbroken stream, then unleash a relentless assault that deals (45/55/70% x STR) damage with **X**(4 x AS rounded up) strikes. Each strike will apply 1 **Bleed** to the target.
 
 **- Effect Logic:** 
-`RESOLVE_DURING_EXECUTION`: **Deal** (110/130/160% x STR) damage and apply 1 **Bleed** for every 0.3 seconds, with minimum 1 strike. (Total strike count = 4 x AS rounded up)
+`RESOLVE_DURING_EXECUTION`: **Deal** (45/55/70% x STR) damage and apply 1 **Bleed** for every 0.3 seconds, with minimum 1 strike. (Total strike count = 4 x AS rounded up)
 
 ### 9. Threefold Sundering - Tam Điệp Phá Cương (Flying Sword Sect)
 **Activation type:** Passive
@@ -238,7 +238,7 @@ Whenever an Action consumes **Shade**, **boost** all damage dealt by that Action
 
 **- Effect Logic:**
 
-`RESOLVE_ON_START` (Before consuming): Check the opponent’s current Health:
+At `ACTION_START` (Before consuming), Check the opponent’s current Health:
 
 - At or above 50% Health: Gain no **Shade**.
 - Below 50% Health: **Gain** 1 stack of **Shade**.

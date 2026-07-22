@@ -118,7 +118,7 @@ For `stack = 1`, cooldown begins after every occurrence.
 
 An Action may create an Effect whose lifetime differs from the Action's execution duration. Such an Effect remains active until its lifetime expires or its removal condition is met.
 
-Example: the Basic Action Shield may execute for 1 second and then create a Shield Effect with a 2-second lifetime and one charge. The Shield negates the next incoming damage instance and is removed immediately when its charge is consumed. A later attack deals damage normally.
+Shield does not create a persistent shield Effect. It has a configured base duration of 1 second and, through `RESOLVE_DURING_EXECUTION`, Boosts the performer's DEF by 100% throughout its effective `(start, end]` interval. The DEF Boost is removed when the Action ends.
 
 Actions or Effects that dynamically change another Action's duration or cooldown are reserved for a future version and are not implemented in the next version.
 
@@ -206,7 +206,7 @@ A selected but locked Action remains in the loadout and can be learned during As
 | `STR` | Offensive power used by server damage calculations. |
 | `HP` | Health. Reaching 0 satisfies a match-end condition. |
 | `DEF` | Damage reduction used by server calculations. |
-| `AS` | Positive integer Attack Speed. It shortens Active Action duration using `ceil(baseDurationTicks / AS)` and is otherwise used by server combat calculations where configured. |
+| `AS` | Positive `numeric(10,2)` Attack Speed. It shortens Active Action duration using `ceil(baseDurationTicks / AS)` and is otherwise used by server combat calculations where configured. |
 
 Every Stat has a maximum level of 3. During Ascension, only `HP`, `STR`, `DEF`, and `AS` may be upgraded.
 
@@ -307,11 +307,18 @@ Qi cannot be upgraded during Ascension.
 Each Stat upgrade permanently increases that Stat's unmodified player value by 10%. The increase is cumulative: each upgrade uses the value produced by the previous permanent upgrade, before temporary Effect modifiers are applied.
 
 ```text
-increase = ceil(permanentStatValue * 0.10)
-permanentStatValue = permanentStatValue + increase
+increase = ceil(integerStatValue * 0.10)
+integerStatValue = integerStatValue + increase
 ```
 
-Stat values are always integers, so every 10% increase is rounded up to the next integer.
+`HP`, `STR`, and `DEF` are integers, so their 10% increase is rounded up to the next integer. `AS` is a positive `numeric(10,2)` value; its permanent increase is rounded up to two decimal places:
+
+```text
+asIncrease = ceil(asValue * 0.10 * 100) / 100
+asValue = asValue + asIncrease
+```
+
+Temporary AS modifiers also use decimal arithmetic and are rounded up to two decimal places before the server calculates Action durations.
 
 For an HP upgrade, calculate the rounded-up increase from the previous `hp.max`, then apply it to both values:
 
