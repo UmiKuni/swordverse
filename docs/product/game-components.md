@@ -190,7 +190,7 @@ While in Ascendance:
 
 **- Duration:** 1.5s | **Cooldown:** 1.5s | **Stack:** 1
 
-**- Description:** Hide into the **Shadow**, gain 1 **Shade** and **boost** 10%/20%/30% STR. Then spring forth and unleash an assassination strike that **deal** (180%/210%/250% x STR) damage and if the target is under **Guard** or **DEFEND**, **deal** additional (60%/70%/80% x STR) damage.
+**- Description:** Hide into the **Shadow**, gain 1 **Shade** and **boost** 10%/20%/30% STR. Then spring forth and unleash an assassination strike that **deal** (180%/210%/250% x STR) damage and if the target is under **Shield** or **Defend**, **deal** additional (60%/70%/80% x STR) damage.
 
 **- Effect Logic:**
 
@@ -198,7 +198,7 @@ While in Ascendance:
 
 `RESOLVE_DURING_EXECUTION`: Boost **Shadow**.
 
-`RESOLVE_ON_END`: **Deal** (180%/210%/250% x STR) damage. If the target is under **Guard** or **Shield**, **deal** additional (60%/70%/80% x STR) damage.
+`RESOLVE_ON_END`: **Deal** (180%/210%/250% x STR) damage. If the target is under **Shield** or **Defend**, **deal** additional (60%/70%/80% x STR) damage.
 
 ### 12. Phantasm - Huyễn (Shadow Sword Sect)
 **- Cost:** 50/70/100
@@ -267,7 +267,7 @@ The damage taken is the amount that will reduce the target's health. It is calcu
 > Damage Taken = Damage Deal x 100/(100 + DEF).
 
 ## Direct Damage
-**Direct Damage** will ignore the target's **DEF** and reduce the target's health directly.
+**Direct Damage** will ignore the target's **DEF**, but it is still absorbed by Barrier.
 
 ## Recover
 The target will increase an amount of X type of resource. The resource can be Qi, Health, or any other type of resource.
