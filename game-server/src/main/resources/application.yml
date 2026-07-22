@@ -3,7 +3,7 @@ spring:
     name: game-server
 
   profiles:
-    active: dev
+    default: dev
 
   datasource:
     url: ${SWORDVERSE_DB_URL}
@@ -16,7 +16,6 @@ spring:
     hibernate:
       ddl-auto: validate
     database: postgresql
-    show-sql: true
 
 swordverse:
   auth:

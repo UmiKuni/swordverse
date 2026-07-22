@@ -82,6 +82,13 @@
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
 
+        <!-- Interactive OpenAPI documentation for development -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>3.0.3</version>
+        </dependency>
+
         <!-- Type-safe custom application properties -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -171,54 +178,48 @@
             </plugin>
 
             <plugin>
-              <groupId>com.diffplug.spotless</groupId>
-              <artifactId>spotless-maven-plugin</artifactId>
-              <version>${spotless.version}</version>
-
-              <configuration>
-                  <java>
-                      <googleJavaFormat>
-                          <style>AOSP</style>
-                      </googleJavaFormat>
-
-                      <removeUnusedImports/>
-                      <formatAnnotations/>
-                      <trimTrailingWhitespace/>
-                      <endWithNewline/>
-                  </java>
-
-                  <formats>
-                      <format>
-                          <includes>
-                              <include>**/*.md</include>
-                              <include>**/*.xml</include>
-                              <include>**/*.yml</include>
-                              <include>**/*.yaml</include>
-                              <include>**/*.json</include>
-                              <include>**/.gitignore</include>
-                          </includes>
-
-                          <excludes>
-                              <exclude>target/**</exclude>
-                              <exclude>**/target/**</exclude>
-                          </excludes>
-
-                          <trimTrailingWhitespace/>
-                          <endWithNewline/>
-                      </format>
-                  </formats>
-              </configuration>
-
-              <executions>
-                  <execution>
-                      <id>check-formatting</id>
-                      <phase>verify</phase>
-                      <goals>
-                          <goal>check</goal>
-                      </goals>
-                  </execution>
-              </executions>
-          </plugin>
+                <groupId>com.diffplug.spotless</groupId>
+                <artifactId>spotless-maven-plugin</artifactId>
+                <version>${spotless.version}</version>
+                <configuration>
+                    <java>
+                        <googleJavaFormat>
+                            <style>AOSP</style>
+                        </googleJavaFormat>
+                        <removeUnusedImports/>
+                        <formatAnnotations/>
+                        <trimTrailingWhitespace/>
+                        <endWithNewline/>
+                    </java>
+                    <formats>
+                        <format>
+                            <includes>
+                                <include>**/*.md</include>
+                                <include>**/*.xml</include>
+                                <include>**/*.yml</include>
+                                <include>**/*.yaml</include>
+                                <include>**/*.json</include>
+                                <include>**/.gitignore</include>
+                            </includes>
+                            <excludes>
+                                <exclude>target/**</exclude>
+                                <exclude>**/target/**</exclude>
+                            </excludes>
+                            <trimTrailingWhitespace/>
+                            <endWithNewline/>
+                        </format>
+                    </formats>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>check-formatting</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 </project>

@@ -6,7 +6,9 @@ import com.swordverse.server.auth.api.dto.LoginRequestDto;
 import com.swordverse.server.auth.api.dto.RegisterRequestDto;
 import com.swordverse.server.auth.application.AuthService;
 import com.swordverse.server.auth.application.model.AuthSessionResult;
+import com.swordverse.server.auth.config.OpenApiConfig;
 import com.swordverse.server.auth.persistence.entity.User;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import java.util.UUID;
@@ -60,6 +62,7 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
+    @SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
     public ResponseEntity<Void> logout(
             @AuthenticationPrincipal Jwt jwt, HttpServletResponse response) {
         authService.logout(sessionId(jwt));
@@ -68,6 +71,7 @@ public class AuthController {
     }
 
     @GetMapping("/me")
+    @SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
     public AuthUserResponse currentUser(@AuthenticationPrincipal Jwt jwt) {
         User user = authService.currentUser(UUID.fromString(jwt.getSubject()));
         return new AuthUserResponse(
