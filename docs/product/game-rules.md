@@ -92,17 +92,19 @@ Each Action level defines:
 
 Time is represented by integer ticks. One tick is `0.1` second.
 
-AS modifies an Active Action's execution duration. `baseDurationTicks` is the configured duration at `AS = 1`. When an occurrence reaches its runtime start position, the server snapshots the performer's strictly positive current AS as `asSnapshot`, then calculates:
+Every Active Action declares exactly one Duration Type: `AS_SCALED`, `FIXED`, or `CONTROLLED`. Passive Actions have no Duration Type. When an occurrence reaches its runtime start position, the server snapshots the performer's strictly positive current AS as `asSnapshot` and calculates its duration according to that type:
 
 ```text
-effectiveDurationTicks = max(1, ceil(baseDurationTicks / asSnapshot))
+AS_SCALED:  effectiveDurationTicks = max(1, ceil(10 / asSnapshot))
+FIXED:      effectiveDurationTicks = durationTicks
+CONTROLLED: effectiveDurationTicks = Action-specific documented rule
 ```
+
+`AS_SCALED` has an implicit one-second standard duration of 10 ticks and has no configured per-Action duration. `FIXED` uses a configured `durationTicks` of at least 1, which never changes with AS, Action level, or runtime state. `CONTROLLED` uses typed, validated configuration or a whitelisted registered handler; it must document an integer-tick result of at least 1 and must not divide an AS-dependent result by AS a second time.
 
 The server schedules that occurrence's `(start, end]` interval and all of its resolution timings from `effectiveDurationTicks`. It then performs runtime validation and atomically checks costs. A valid occurrence executes across the calculated interval; an invalid occurrence becomes `EMPTY_SLOT` but retains that interval. The next occurrence on the same player's timeline begins after that interval ends.
 
-Each player's queue is scheduled incrementally during Battle. Both players still share one deterministic timeline, but AS gained during Battle can affect the duration of later occurrences that have not started. It never reschedules an occurrence that has started. Rounding up preserves the integer `0.1`-second tick timeline, and an Action can never be shorter than one tick.
-
-An Action with a documented controlled custom duration calculates that duration at runtime instead of using the default formula and must not apply the default formula a second time.
+Each player's queue is scheduled incrementally during Battle. Both players still share one deterministic timeline, but AS gained during Battle can affect later `AS_SCALED` and AS-dependent `CONTROLLED` occurrences that have not started. It never reschedules an occurrence that has started and never changes a `FIXED` occurrence. AS does not modify cooldown directly.
 
 `SLASH`, `DEFEND`, and `SHIELD` are Basic Actions with no cooldown. Main and Support Sect Techniques may define cooldowns, measured in `0.1`-second ticks. AS does not modify cooldowns.
 
@@ -122,9 +124,9 @@ For `stack = 1`, cooldown begins after every occurrence.
 
 An Action may create an Effect whose lifetime differs from the Action's execution duration. Such an Effect remains active until its lifetime expires or its removal condition is met.
 
-Shield does not create a persistent shield Effect. It has a configured base duration of 1 second and, through `RESOLVE_DURING_EXECUTION`, Boosts the performer's DEF by 100% throughout its effective `(start, end]` interval. The DEF Boost is removed when the Action ends.
+Shield is `FIXED` at 10 ticks and does not create a persistent shield Effect. Through `RESOLVE_DURING_EXECUTION`, it Boosts the performer's DEF by 100% throughout its complete `(start, end]` interval. The DEF Boost is removed when the Action ends.
 
-Defend is also execution-bound. It has a configured base duration of 1 second and, through `RESOLVE_DURING_EXECUTION`, ignores incoming Slash damage only throughout its effective `(start, end]` interval. Its protection ends when the Action ends.
+Defend is `AS_SCALED` and execution-bound. It creates exactly one blocking charge during its effective `(start, end]` interval. The charge ignores and consumes only the next incoming Slash damage instance; non-Slash damage does not consume it. If multiple qualifying Slash instances resolve at the same timeline point, deterministic same-tick ordering selects the first. A higher-priority Effect that already ignored the instance prevents Defend from consuming its charge. The Action continues after the charge is consumed, and an unused charge expires when Defend ends. A target remains under Defend throughout its execution interval even when the charge has been consumed.
 
 Actions or Effects that dynamically change another Action's duration or cooldown are reserved for a future version and are not implemented in the next version.
 
@@ -222,7 +224,7 @@ A selected but locked Action remains in the loadout and can be learned during As
 | `STR` | Offensive power used by server damage calculations. |
 | `HP` | Health. Reaching 0 satisfies a match-end condition. |
 | `DEF` | Damage reduction used by server calculations. |
-| `AS` | Positive `numeric(10,2)` Attack Speed. It shortens Active Action duration using `ceil(baseDurationTicks / AS)` and is otherwise used by server combat calculations where configured. |
+| `AS` | Positive `numeric(10,2)` Attack Speed. It shortens `AS_SCALED` Actions using `ceil(10 / AS)` and is otherwise used by documented `CONTROLLED` duration rules or server combat calculations where configured. |
 
 Every Stat has a maximum level of 3. During Ascension, only `HP`, `STR`, `DEF`, and `AS` may be upgraded.
 
@@ -390,7 +392,7 @@ Rules:
 
 ### 9.4 Queue validation
 
-Before confirming, a player may request an authoritative preview validation of the current queue any number of times. Checking does not confirm or lock the queue, and its result is advisory because runtime state may change before an Action executes. Preview durations are estimates calculated with the player's AS at the time of the check; Battle events provide the authoritative runtime durations.
+Before confirming, a player may request an authoritative preview validation of the current queue any number of times. Checking does not confirm or lock the queue, and its result is advisory because runtime state may change before an Action executes. The preview estimates an `AS_SCALED` duration using the player's current AS, uses configured `durationTicks` for `FIXED`, and evaluates the same available-state rule for `CONTROLLED`. Battle events provide the authoritative runtime durations.
 
 The server returns whether the queue is valid and all detected violations, including the relevant Action occurrence where possible:
 
@@ -437,7 +439,7 @@ All events scheduled for the same timeline point are resolved by deterministic s
 
 ### 10.2 Runtime Action validation
 
-When an occurrence reaches its runtime start position, the server snapshots AS, calculates and reserves its interval, then validates it using the actual runtime state. Runtime validation includes Action eligibility, cooldown, stack, configured cost, and any other execution requirements.
+When an occurrence reaches its runtime start position, the server snapshots AS, calculates duration from its Duration Type, and reserves its interval, then validates it using the actual runtime state. Runtime validation includes Action eligibility, cooldown, stack, configured cost, and any other execution requirements.
 
 If an occurrence is invalid:
 

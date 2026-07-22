@@ -2,16 +2,20 @@
 ## 3 BASIC ACTIONS
 Basic Actions have infinite Stack and no Cooldown.
 
-### Action duration convention
+### Action Duration Types
 
-For a normal Active Action, **Base Duration** is the configured duration at `AS = 1`. When an occurrence reaches its runtime start position, the server snapshots the performer's current AS as `asSnapshot` and calculates `effectiveDurationTicks = max(1, ceil(baseDurationTicks / asSnapshot))`. The snapshot controls that occurrence's complete interval and is not changed by later AS modifiers. Cooldown is never divided by AS, although a shorter Action can cause its cooldown window to begin earlier.
+Every Active Action declares exactly one Duration Type. Passive Actions have no Duration Type.
 
-An Action with a controlled custom duration documents that exception explicitly. It does not apply the normal Base Duration formula a second time.
+- `AS_SCALED` uses the implicit one-second standard duration: `effectiveDurationTicks = max(1, ceil(10 / asSnapshot))`.
+- `FIXED` uses its configured duration unchanged by AS.
+- `CONTROLLED` uses its documented Action-specific duration rule.
+
+The server captures a strictly positive `asSnapshot` when every Active Action begins. It affects `AS_SCALED` Actions and any `CONTROLLED` Action whose documented rule uses AS. AS never modifies cooldown directly.
 
 ### Slash
 **- Cost:** 40 | **Activation type:** Active
 
-**- Base Duration:** 1 second
+**- Duration Type:** `AS_SCALED`
 
 **- Description:** Deal (100% x STR) damage to the target.
 
@@ -21,17 +25,17 @@ An Action with a controlled custom duration documents that exception explicitly.
 ### Defend
 **- Cost:** 20 | **Activation type:** Active
 
-**- Base Duration:** 1 second
+**- Duration Type:** `AS_SCALED`
 
-**- Description:** Defend yourself and ignore incoming **Slash** damage while this Action executes.
+**- Description:** Assume a defensive stance and ignore the next incoming **Slash** damage instance while this Action executes.
 
 **- Effect Logic:** 
-`RESOLVE_DURING_EXECUTION`: Ignore incoming **Slash** damage.
+`RESOLVE_DURING_EXECUTION`: Gain 1 execution-bound blocking charge. Ignore the next incoming **Slash** damage instance and consume the charge. Any unused charge expires when this Action ends.
 
 ### Shield
 **- Cost:** 60 | **Activation type:** Active
 
-**- Base Duration:** 1 second
+**- Duration Type:** `FIXED` | **Duration:** 1 second
 
 **- Description:** **Boost** the DEF stat by 100% while executing the Action.
 
@@ -90,7 +94,7 @@ An Action with a controlled custom duration documents that exception explicitly.
 ### 1. Mindbound Edge - Liễm Thần Định Phong (True Sword Sect)
 **- Cost:** 50/80/100 | **Activation type:** Active
 
-**- Base Duration:** 1s | **Cooldown:** 1s | **Stack:** 1
+**- Duration Type:** `FIXED` | **Duration:** 1s | **Cooldown:** 1s | **Stack:** 1
 
 **- Description:** Grip the sword with both hands, then release a precise strike, **deal** (150/200/250% x STR) damage.
 
@@ -101,7 +105,7 @@ An Action with a controlled custom duration documents that exception explicitly.
 ### 2. Rising Reprisal - Thừa Kình Liêu Trảm (True Sword Sect)
 **- Cost:** 55/85/110 | **Activation type:** Active
 
-**- Base Duration:** 1s | **Cooldown:** 1s | **Stack:** 1
+**- Duration Type:** `FIXED` | **Duration:** 1s | **Cooldown:** 1s | **Stack:** 1
 
 **- Description:** Assume a guarded sword stance, **boost** 10/20/30 DEF while executing. On Completion, unleash an upward slash that **deal** (120/160/210% x STR) damage. If taken damage while in the stance, **deal** additional (50% x STR) damage.
 
@@ -114,7 +118,9 @@ An Action with a controlled custom duration documents that exception explicitly.
 ### 3. One Thought, Myriad Edges - Nhất Niệm Vạn Kiếm (True Sword Sect)
 **- Cost:** 70/90/120 | **Activation type:** Active
 
-**- Base Duration:** 3/4/5 x 0.5s | **Cooldown:** 1s | **Stack:** 1
+**- Duration Type:** `CONTROLLED` | **Cooldown:** 1s | **Stack:** 1
+
+**- Duration Rule:** `effectiveDurationTicks = configuredStrikeCount * 5`, where configured strike count is 3/4/5 at Action levels 1/2/3.
 
 **- Description:** Focus the mind upon a single thought, then release 3/4/5 precise consecutive strikes that each **deal** (90/120/160% x STR) damage. After finishing, **gain** 10% Max HP Barrier for the rest of the round.
 
@@ -132,7 +138,7 @@ An Action with a controlled custom duration documents that exception explicitly.
 ### 5. Egoless Revelation - Vô Ngã Chứng Chân (True Sword Sect)
 **- Cost:** 60/80/100 | **Activation type:** Active - Ultimate
 
-**- Base Duration:** 0.5s | **Cooldown:** 4s | **Stack:** 1
+**- Duration Type:** `FIXED` | **Duration:** 0.5s | **Cooldown:** 4s | **Stack:** 1
 
 **- Description:** Enter the state of Egoless and **gain** 10%/20%/30% STR. If this is the 2nd activation, release a True Intent slash that **deals** (150%/200%/250% x STR) damage and additional (50% x STR) damage for each stack of *"Intent"*.
 
@@ -145,7 +151,7 @@ An Action with a controlled custom duration documents that exception explicitly.
 ### 6. White Rainbow Pierces the Sun - Bạch Hồng Quán Nhật (Flying Sword Sect)
 **- Cost:** 40/60/90 | **Activation type:** Active
 
-**- Base Duration:** 1s | **Cooldown:** 1s | **Stack:** 1
+**- Duration Type:** `FIXED` | **Duration:** 1s | **Cooldown:** 1s | **Stack:** 1
 
 **- Description:** Send the sword flying towards the target, then pierce through the target, **deal** (120/150/190% x STR) damage. 
 (This action is considered as a **Slash**.)
@@ -157,7 +163,7 @@ An Action with a controlled custom duration documents that exception explicitly.
 ### 7. Heavenly Sword Circuit - Kiếm Luân Chu Thiên (Flying Sword Sect)
 **- Cost:** 60/90/130 | **Activation type:** Active
 
-**- Base Duration:** 0.5s | **Cooldown:** 4s | **Stack:** 1
+**- Duration Type:** `FIXED` | **Duration:** 0.5s | **Cooldown:** 4s | **Stack:** 1
 
 **- Description:** Circulate and weave the power of the flying swords into an unbroken cycle. Then, **gain** 10/15/20% STR and 20/30/40% AS and recover 30/40/50 Qi.
 
@@ -168,7 +174,9 @@ An Action with a controlled custom duration documents that exception explicitly.
 ### 8. River of Myriad Blades - Vạn Kiếm Trường Hà (Flying Sword Sect)
 **- Cost:** 100/130/170 | **Activation type:** Active
 
-**- Runtime Duration:** `X * 3` ticks | **Cooldown:** 3s | **Stack:** 1
+**- Duration Type:** `CONTROLLED` | **Cooldown:** 3s | **Stack:** 1
+
+**- Duration Rule:** `X = ceil(4 x asSnapshot)` and `effectiveDurationTicks = X * 3`.
 
 **- Description:** Converge the flying swords into an unbroken stream, then unleash a relentless assault that deals (45/55/70% x STR) damage with `X = ceil(4 x asSnapshot)` strikes. Each strike applies 1 **Bleed** to the target.
 
@@ -183,7 +191,7 @@ An Action with a controlled custom duration documents that exception explicitly.
 ### 10. Myriad Blades Crown the Ascendant - Vạn Kiếm Triều Tiên (Flying Sword Sect)
 **- Cost:** 150/180/230 | **Activation type:** Active - Ultimate
 
-**- Base Duration:** 1s | **Cooldown:** 6s | **Stack:** 1
+**- Duration Type:** `FIXED` | **Duration:** 1s | **Cooldown:** 6s | **Stack:** 1
 
 **- Description:** Converge the flying swords to **gain** (5/7/10% Max HP) Barrier and empower them with the aura of **Ascendance**. While in **Ascendance**, the performer **gains** 30%/50%/70% AS and applies 1 additional **Bleed** whenever the performer successfully deals damage. At `BATTLE_END`, after Bleed resolves, each Bleed stack attributed to the performer that resolved deals (7% x STR) damage to the target.
 
@@ -200,7 +208,7 @@ While in Ascendance:
 ### 11. Ambush - Tập (Shadow Sword Sect)
 **- Cost:** 100/120/150 | **Activation type:** Active
 
-**- Base Duration:** 1.5s | **Cooldown:** 1.5s | **Stack:** 1
+**- Duration Type:** `FIXED` | **Duration:** 1.5s | **Cooldown:** 1.5s | **Stack:** 1
 
 **- Description:** Hide in **Shadow**, gain 1 **Shade**, and **boost** 10%/20%/30% STR. Then spring forth and unleash an assassination strike that **deals** (180%/210%/250% x STR) damage and, if the target is under **Shield** or **Defend**, **deals** additional (60%/70%/80% x STR) damage.
 
@@ -215,7 +223,7 @@ While in Ascendance:
 ### 12. Phantasm - Huyễn (Shadow Sword Sect)
 **- Cost:** 50/70/100 | **Activation type:** Active
 
-**- Base Duration:** 0.7s | **Cooldown:** 1.5s | **Stack:** 2
+**- Duration Type:** `FIXED` | **Duration:** 0.7s | **Cooldown:** 1.5s | **Stack:** 2
 
 **- Description:** 
 1st stack: Consume 1 **Shade** to unleash an illusion strike that **deals** (150%/170%/200% x STR) damage.
@@ -229,12 +237,12 @@ While in Ascendance:
 ### 13. Rend - Liệt (Shadow Sword Sect)
 **- Cost:** 50/70/100 | **Activation type:** Active
 
-**- Base Duration:** 0.5s | **Cooldown:** 3s | **Stack:** 1
+**- Duration Type:** `FIXED` | **Duration:** 0.5s | **Cooldown:** 3s | **Stack:** 1
 
-**- Description:** Instantly flash past the target, leaving behind a swift slash that **deals** (50%/70%/100% x STR) damage, then consume 1 **Shade** to reduce the target's DEF by 13/15/18 for the rest of the round.
+**- Description:** Instantly flash past the target, leaving behind a swift slash that **deals** (50%/70%/100% x STR) damage, then consume 1 **Shade** to reduce the target's DEF by 10/13/17 for the rest of the round.
 
 **- Effect Logic:**
-`RESOLVE_ON_START`: **Deal** (50%/70%/100% x STR) damage, then consume 1 **Shade** to reduce the target’s DEF by 13/15/18.
+`RESOLVE_ON_START`: **Deal** (50%/70%/100% x STR) damage, then consume 1 **Shade** to reduce the target’s DEF by 10/13/17.
 
 ### 14. Predation - Liệp (Shadow Sword Sect)
 **Activation type:** Passive
@@ -255,7 +263,7 @@ If the current Action consumes one or more stacks of **Shade**, **boost** its da
 ### 15. Eclipse - Thực (Shadow Sword Sect)
 **- Cost:** 150/200/250 | **Activation type:** Active - Ultimate
 
-**- Base Duration:** 1.5s | **Cooldown:** 7s | **Stack:** 1
+**- Duration Type:** `FIXED` | **Duration:** 1.5s | **Cooldown:** 7s | **Stack:** 1
 
 **- Description:** Consume all stacks of **Shade** and accumulate the power of **Shadow**. Then, release a devastating strike that **deals** (100%/150%/200% x STR + 10% target's Missing HP) damage and additional (50% x STR) damage for each stack of **Shade** consumed.
 

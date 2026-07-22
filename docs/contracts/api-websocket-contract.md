@@ -137,7 +137,7 @@ An active Action slot may appear multiple times in the same queue. Passive Actio
 
 An Action Queue has no maximum number of occurrences and no maximum timeline duration. Each occurrence receives its effective duration at runtime, but the complete queue may use any number of ticks.
 
-One tick is `0.1` second. Actions occupy `(startTick, endTick]`. At an occurrence's runtime start position, the server snapshots strictly positive `currentAS` as `asSnapshot`, calculates `effectiveDurationTicks = max(1, ceil(baseDurationTicks / asSnapshot))`, reserves the interval, then validates the occurrence and atomically checks costs. Invalid occurrences become `EMPTY_SLOT` and retain the interval calculated from `asSnapshot`. Each player's queue is scheduled incrementally, so AS gained during Battle may affect later occurrences that have not started. AS does not modify cooldown values directly. `SLASH`, `DEFEND`, and `SHIELD` are Basic Actions with unlimited consecutive uses and no cooldown. Sect Techniques use their configured cooldown unchanged by AS.
+One tick is `0.1` second. Actions occupy `(startTick, endTick]`. At an occurrence's runtime start position, the server snapshots strictly positive `currentAS` as `asSnapshot`, calculates duration from `durationType`, reserves the interval, then validates the occurrence and atomically checks costs. `AS_SCALED` uses `max(1, ceil(10 / asSnapshot))`; `FIXED` uses configured `durationTicks`; and `CONTROLLED` uses its documented server-side rule. Invalid occurrences become `EMPTY_SLOT` and retain the interval calculated from their Duration Type. Each player's queue is scheduled incrementally, so AS gained during Battle may affect later `AS_SCALED` and AS-dependent `CONTROLLED` occurrences that have not started, but never affects `FIXED` occurrences. AS does not modify cooldown values directly. `SLASH`, `DEFEND`, and `SHIELD` are Basic Actions with unlimited consecutive uses and no cooldown. Sect Techniques use their configured cooldown unchanged by AS.
 
 Before confirming, the client may request an advisory queue check. It reports cooldown, stack, transition, ownership, level, and activation-type violations. It never checks resource sufficiency and does not confirm, lock, or block the queue.
 
@@ -175,6 +175,8 @@ Both Action Queues resolve simultaneously on the same 0.1-second timeline. Actio
 Every occurrence is checked against actual runtime state after its AS snapshot and interval are calculated. If it is invalid, cannot pay its cost, or is disabled, it becomes `EMPTY_SLOT`, produces no Effects, and keeps its scheduled interval so later Actions do not shift. The opposing timeline continues. In persistence, `EMPTY_RUNTIME` represents this public `EMPTY_SLOT` runtime status.
 
 Passive Actions may trigger from gameplay events produced during resolution. Passive results are included in timeline resolution events; Passive Actions are never valid executable queue entries.
+
+Defend creates one execution-bound blocking charge for its effective interval. It consumes the charge only when it ignores the next qualifying Slash damage instance; non-Slash damage, or an instance already ignored by a higher-priority Effect, does not consume it. The charge expires at the interval endpoint if unused, while the Defend occurrence continues until that endpoint even when the charge is consumed.
 
 ---
 
@@ -450,7 +452,8 @@ Response `200 OK`:
     {
       "level": 1,
       "learningPointCost": 1,
-      "baseDurationTicks": 10,
+      "durationType": "FIXED",
+      "durationTicks": 10,
       "baseCooldownTicks": 5,
       "maxConsecutiveStacks": 1,
       "costs": [
@@ -1223,9 +1226,9 @@ Private response:
 }
 ```
 
-The check is advisory. It does not persist, confirm, lock, reject, or alter the queue. It reports every detectable non-resource violation, including `COOLDOWN_INVALID`, `ACTION_NOT_OWNED`, `ACTION_LOCKED`, `ACTION_NOT_QUEUEABLE`, and `QUEUE_TRANSITION_INVALID`. It never checks QI, HP, or any other Action cost. `totalDurationTicks`, occurrence boundaries, and `effectiveDurationTicks` are estimates calculated using AS at the time of the check; runtime Battle events are authoritative.
+The check is advisory. It does not persist, confirm, lock, reject, or alter the queue. It reports every detectable non-resource violation, including `COOLDOWN_INVALID`, `ACTION_NOT_OWNED`, `ACTION_LOCKED`, `ACTION_NOT_QUEUEABLE`, and `QUEUE_TRANSITION_INVALID`. It never checks QI, HP, or any other Action cost. It estimates `AS_SCALED` with AS at preview time, uses configured `durationTicks` for `FIXED`, and evaluates the available-state rule for `CONTROLLED`. `totalDurationTicks`, occurrence boundaries, and `effectiveDurationTicks` are estimates; runtime Battle events are authoritative.
 
-AS modifies duration through the runtime `asSnapshot` formula. `SLASH`, `DEFEND`, and `SHIELD` have no cooldown. Sect Techniques use `baseCooldownTicks` unchanged by AS, though a shorter Action can cause its cooldown window to begin earlier.
+AS affects `AS_SCALED` and AS-dependent `CONTROLLED` durations through the runtime `asSnapshot` rule. `SLASH`, `DEFEND`, and `SHIELD` have no cooldown. Sect Techniques use `baseCooldownTicks` unchanged by AS, though a shorter Action can cause its cooldown window to begin earlier.
 
 ### 11.4 Confirm Action Queue
 
@@ -1280,17 +1283,18 @@ Errors are limited to command-level failures such as `INVALID_MATCH_PHASE`, `MAL
     "actionSlotId": "863cda43-a4bf-4fd9-858a-715cc46fe982",
     "actionId": "737cb9aa-f0c8-4180-a9c8-a94fe9e0de7d",
     "actionKey": "SLASH",
+    "durationType": "AS_SCALED",
     "resolutionTypes": ["RESOLVE_ON_END"],
     "asSnapshot": 1.25,
     "startTick": 0,
-    "endTick": 10,
-    "effectiveDurationTicks": 10,
-    "effectiveCooldownTicks": 1
+    "endTick": 8,
+    "effectiveDurationTicks": 8,
+    "effectiveCooldownTicks": 0
   }
 }
 ```
 
-`ACTION_STARTED` is the public representation of the internal authoritative `ACTION_STARTED` gameplay event. It reveals the occurrence and its authoritative `asSnapshot` and duration, but never exposes server-only Passive trigger configuration. Basic Actions have no cooldown; Sect Technique cooldowns use their configured values unchanged by AS. `RESOLVE_ON_START` Effects resolve at `startTick + 1`, `RESOLVE_DURING_EXECUTION` Effects remain active for the complete `(startTick, endTick]` interval, and `RESOLVE_ON_END` Effects resolve at `endTick`.
+`ACTION_STARTED` is the public representation of the internal authoritative `ACTION_STARTED` gameplay event. It reveals `durationType`, `asSnapshot`, `startTick`, `endTick`, and authoritative `effectiveDurationTicks`, but never exposes executable formulas, internal handlers, arbitrary server configuration, or hidden Passive trigger configuration. In the example, `ceil(10 / 1.25) = 8`. Basic Actions have no cooldown; Sect Technique cooldowns use their configured values unchanged by AS. `RESOLVE_ON_START` Effects resolve at `startTick + 1`, `RESOLVE_DURING_EXECUTION` Effects remain active for the complete `(startTick, endTick]` interval, and `RESOLVE_ON_END` Effects resolve at `endTick`.
 
 ### 12.2 Timeline point resolved
 
@@ -1481,6 +1485,10 @@ Private STOMP rejection:
 ```ts
 export type ActionSource = "BASIC" | "SECT_TECHNIQUE";
 export type ActivationType = "ACTIVE" | "PASSIVE";
+export type ActionDurationType =
+  | "AS_SCALED"
+  | "FIXED"
+  | "CONTROLLED";
 export type ResolutionType =
   | "RESOLVE_ON_START"
   | "RESOLVE_DURING_EXECUTION"
@@ -1547,7 +1555,8 @@ export interface ActionSummary {
 export interface ActionLevelDefinition {
   level: 1 | 2 | 3;
   learningPointCost: number;
-  baseDurationTicks: number | null;
+  durationType: ActionDurationType | null;
+  durationTicks: number | null;
   baseCooldownTicks: number | null;
   maxConsecutiveStacks: number | null;
 }
@@ -1633,6 +1642,12 @@ public enum ActionSource {
 
 public enum ActivationType {
     ACTIVE, PASSIVE
+}
+
+public enum ActionDurationType {
+    AS_SCALED,
+    FIXED,
+    CONTROLLED
 }
 
 public enum ResolutionType {

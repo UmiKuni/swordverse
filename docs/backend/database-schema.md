@@ -741,7 +741,9 @@ The `action_levels` table only stores actual configured levels, usually level 1 
 | `action_id` | `uuid` | FK | No | Action this level belongs to. References `actions.id`. |
 | `level` | `int` |  | No | Level number of the Action, from 1 through 3. |
 | `learning_point_cost` | `int` |  | No | LP cost required to learn or upgrade to this level. |
-| `base_duration_ticks` | `int` |  | Yes | Base execution duration in 0.1-second ticks. Required for Active Actions and null for Passive Actions. |
+| `duration_type` | `varchar(20)` |  | Yes | `AS_SCALED`, `FIXED`, or `CONTROLLED` for an Active Action. Null for Passive Actions. |
+| `duration_ticks` | `int` |  | Yes | Configured duration in 0.1-second ticks for a `FIXED` Action. Null otherwise. |
+| `duration_config` | `jsonb` |  | Yes | Typed, validated configuration for a `CONTROLLED` Action. Null otherwise. |
 | `cooldown_ticks` | `int` |  | Yes | Configured base cooldown after the Action's consecutive stack chain, in 0.1-second ticks. Basic Actions use `0`. |
 | `max_consecutive_stacks` | `int` |  | Yes | Maximum immediately consecutive uses before cooldown applies. Null means unlimited for a Basic Action. |
 | `created_at` | `timestamptz` |  | No | Timestamp when the Action level record was created. |
@@ -771,7 +773,9 @@ CHECK (level BETWEEN 1 AND 3)
 
 ```sql
 CHECK (learning_point_cost >= 0)
-CHECK (base_duration_ticks IS NULL OR base_duration_ticks >= 1)
+CHECK (duration_type IS NULL OR duration_type IN ('AS_SCALED', 'FIXED', 'CONTROLLED'))
+CHECK (duration_ticks IS NULL OR duration_ticks >= 1)
+CHECK (duration_config IS NULL OR jsonb_typeof(duration_config) = 'object')
 CHECK (cooldown_ticks IS NULL OR cooldown_ticks >= 0)
 CHECK (max_consecutive_stacks IS NULL OR max_consecutive_stacks >= 1)
 ```
@@ -796,9 +800,11 @@ ON action_levels(action_id);
 
 - Resource costs are defined in `action_costs`.
 - `learning_point_cost` is used during the Ascension Phase.
-- Active Sect Technique levels must define `base_duration_ticks`, `cooldown_ticks`, and `max_consecutive_stacks`; Passive Action levels leave these columns null. Basic Action levels use `cooldown_ticks = 0` and `max_consecutive_stacks = null` for unlimited consecutive use. This cross-table rule is enforced by the service layer.
+- Active Sect Technique levels must define `duration_type`, `cooldown_ticks`, and `max_consecutive_stacks`; Passive Action levels leave all duration fields null. Basic Action levels use `cooldown_ticks = 0` and `max_consecutive_stacks = null` for unlimited consecutive use. This cross-table rule is enforced by the service layer.
 - One tick is exactly 0.1 second.
-- `base_duration_ticks` is the configured duration at `AS = 1`. When an Active Action occurrence reaches its runtime start position, the server snapshots strictly positive `current_as` as `as_snapshot`, calculates `effective_duration_ticks = max(1, ceil(base_duration_ticks / as_snapshot))`, and uses that value to schedule the `(start, end]` interval and resolution timings. AS does not modify cooldown. `SLASH`, `DEFEND`, and `SHIELD` have no cooldown; Main and Support Sect Techniques use their configured cooldown unchanged.
+- Duration combinations are enforced by the service layer: `ACTIVE + AS_SCALED` requires `duration_type = AS_SCALED` with `duration_ticks` and `duration_config` null; `ACTIVE + FIXED` requires `duration_type = FIXED`, `duration_ticks >= 1`, and `duration_config` null; `ACTIVE + CONTROLLED` requires `duration_type = CONTROLLED`, `duration_ticks` null, and validated `duration_config` or a whitelisted registered handler; `PASSIVE` requires all duration fields null.
+- `duration_config` contains only fields declared by its typed duration DTO. It must never contain executable expressions, scripts, SQL, Java class names, or arbitrary code.
+- When an Active Action occurrence reaches its runtime start position, the server snapshots strictly positive `current_as` as `as_snapshot` and calculates duration from `duration_type`: `AS_SCALED` uses `max(1, ceil(10 / as_snapshot))`; `FIXED` uses `duration_ticks`; and `CONTROLLED` uses typed validated configuration or a whitelisted registered handler. The server uses the result to schedule the `(start, end]` interval and resolution timings. AS does not modify cooldown. `SLASH`, `DEFEND`, and `SHIELD` have no cooldown; Main and Support Sect Techniques use their configured cooldown unchanged.
 - For an Action with a configured cooldown, cooldown begins at the end of the final occurrence in a gapless stack chain. Each occurrence pays its own configured costs.
 - Dynamic Effects that modify another Action's duration or cooldown are intentionally not supported in the next version; the tick columns leave room for that future extension.
 - If a player has `current_level = 0`, the Action is locked and cannot be used.
@@ -1820,11 +1826,11 @@ ON action_queue_entries(match_player_id, round_number);
 - Queue entries reference `match_player_action_slots`, not `actions` directly.
 - The same `action_slot_id` may appear multiple times in the same round.
 - Queue confirmation does not run validation and does not reject an invalid queue.
-- Before confirmation, the server may calculate an advisory result containing timing, cooldown, stack, transition, ownership, level, and activation-type violations without persisting or locking the queue. Its duration values are estimates based on AS at the time of the check. It never checks resource sufficiency.
+- Before confirmation, the server may calculate an advisory result containing timing, cooldown, stack, transition, ownership, level, and activation-type violations without persisting or locking the queue. It estimates `AS_SCALED` from current AS, uses configured ticks for `FIXED`, and evaluates the available-state rule for `CONTROLLED`. It never checks resource sufficiency.
 - At runtime, the service layer checks ownership, Action level, activation type, cooldown, consecutive stack, costs, disabled state, and other execution requirements.
 - A runtime-invalid occurrence is changed to `EMPTY_RUNTIME`, its `action_slot_id` is cleared, and `runtime_failure_reason` records why. It pays no cost and produces no Action Effects. `EMPTY_RUNTIME` is the database representation of the public `EMPTY_SLOT` runtime status.
 - Runtime conversion to `EMPTY_RUNTIME` must not stop the opponent's timeline.
-- `scheduled_start_tick` and `scheduled_end_tick` preserve deterministic `(start, end]` timing, including after an occurrence becomes `EMPTY_RUNTIME`, so later Actions do not shift. At its runtime start position, the server captures `as_snapshot`, calculates the occurrence's effective duration, then reserves its interval before validation and cost checks. Later AS changes may affect later occurrences that have not started, but never reschedule an occurrence that has started. AS does not modify cooldown. Basic Actions have no cooldown; Sect Techniques use their configured cooldown unchanged.
+- `scheduled_start_tick` and `scheduled_end_tick` preserve deterministic `(start, end]` timing, including after an occurrence becomes `EMPTY_RUNTIME`, so later Actions do not shift. At its runtime start position, the server captures `as_snapshot`, calculates the occurrence's duration from `duration_type`, then reserves its interval before validation and cost checks. Later AS changes may affect later `AS_SCALED` or AS-dependent `CONTROLLED` occurrences that have not started, but never reschedule an occurrence that has started and never affect `FIXED` occurrences. AS does not modify cooldown. Basic Actions have no cooldown; Sect Techniques use their configured cooldown unchanged.
 - The service layer does not enforce an Action Queue entry-count or timeline-duration limit.
 - After round 1, a valid sequence is derived from the previous confirmed sequence by removing zero or one contiguous range, retaining the relative order of all remaining occurrences, and inserting new occurrences anywhere. The removed range must satisfy `removed_duration_ticks * 3 <= previous_resolved_queue_duration_ticks`; this previous duration is the prior round's authoritative duration, including reserved runtime-empty intervals, not a capacity. Advisory validation reports violations without blocking confirmation; at runtime, violating occurrences are converted to `EMPTY_RUNTIME` with `QUEUE_TRANSITION_INVALID`.
 
@@ -1937,6 +1943,7 @@ ON active_effects(effect_definition_id);
 - The service layer should enforce max stack rules using `effect_definitions.max_stacks`.
 - Charge-based Effects are removed when `remaining_charges` reaches 0.
 - Tick-based Effects use the shared 0.1-second timeline and remain active through their inclusive endpoint.
+- Defend creates an execution-bound Effect with `remaining_charges = 1` and a lifetime equal to its occurrence's calculated interval. It is removed when it ignores its next qualifying Slash damage instance or when that interval reaches its endpoint; consuming the charge does not end the Defend occurrence.
 - When an active Effect expires, the service layer may delete the row or keep it until match cleanup. The recommended behavior is to delete expired active Effects.
 
 ---
