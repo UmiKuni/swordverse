@@ -14,6 +14,8 @@ function App() {
   const [connectionStatus, setConnectionStatus] =
     useState<ConnectionStatus>("DISCONNECTED");
 
+  const [accessToken, setAccessToken] = useState("");
+
   const [systemStatus, setSystemStatus] = useState<SystemStatusEvent | null>(
     null,
   );
@@ -22,9 +24,15 @@ function App() {
 
   function connect() {
     setError(null);
+
+    if (accessToken.trim() === "") {
+      setError("Access token is required.");
+      return;
+    }
+
     setConnectionStatus("CONNECTING");
 
-    connectRealtime({
+    connectRealtime(accessToken.trim(), {
       onConnected() {
         setConnectionStatus("CONNECTED");
       },
@@ -77,6 +85,20 @@ function App() {
         <p>
           Connection: <strong>{connectionStatus}</strong>
         </p>
+
+        <label className="token-field">
+          <span>Access token</span>
+
+          <textarea
+            value={accessToken}
+            onChange={(event) => {
+              setAccessToken(event.target.value);
+            }}
+            disabled={connectionStatus !== "DISCONNECTED"}
+            rows={5}
+            placeholder="Paste the SwordVerse access token"
+          />
+        </label>
 
         <div className="actions">
           <button

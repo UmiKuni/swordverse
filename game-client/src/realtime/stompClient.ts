@@ -1,10 +1,10 @@
-/** Owns the single SockJS/STOMP client and its connect, disconnect, and reconnect lifecycle. */
 import { Client, type IMessage, type StompSubscription } from "@stomp/stompjs";
 import type { SystemStatusEvent } from "./messageTypes";
 
 const SYSTEM_STATUS_TOPIC = "/topic/system/status";
 const SYSTEM_STATUS_COMMAND = "/app/system/status";
 
+/** Callbacks through which the singleton realtime client reports lifecycle and domain events. */
 export type RealtimeCallbacks = {
   onConnected: () => void;
   onDisconnected: () => void;
@@ -15,13 +15,27 @@ export type RealtimeCallbacks = {
 let client: Client | null = null;
 let systemStatusSubscription: StompSubscription | null = null;
 
-export function connectRealtime(callbacks: RealtimeCallbacks): void {
-  if (client?.active) {
+/**
+ * Starts the single SwordVerse STOMP lifecycle and authenticates CONNECT with an in-memory access
+ * token. Calls made while another lifecycle exists are ignored.
+ *
+ * @param accessToken current SwordVerse JWT access token
+ * @param callbacks consumers for connection, error, and system-status events
+ */
+export function connectRealtime(
+  accessToken: string,
+  callbacks: RealtimeCallbacks,
+): void {
+  if (client !== null) {
     return;
   }
 
-  client = new Client({
+  const nextClient = new Client({
     brokerURL: "ws://localhost:8080/ws",
+
+    connectHeaders: {
+      Authorization: `Bearer ${accessToken}`,
+    },
 
     reconnectDelay: 0,
 
@@ -30,9 +44,13 @@ export function connectRealtime(callbacks: RealtimeCallbacks): void {
     },
 
     onConnect() {
+      if (client !== nextClient) {
+        return;
+      }
+
       callbacks.onConnected();
 
-      systemStatusSubscription = client!.subscribe(
+      systemStatusSubscription = nextClient.subscribe(
         SYSTEM_STATUS_TOPIC,
         (message: IMessage) => {
           try {
@@ -48,25 +66,75 @@ export function connectRealtime(callbacks: RealtimeCallbacks): void {
       );
     },
 
-    onStompError(frame) {
-      callbacks.onError(
-        frame.headers.message ?? "SwordVerse STOMP connection failed.",
-      );
+    onStompError() {
+      if (client !== nextClient) {
+        return;
+      }
+
+      callbacks.onError("SwordVerse rejected the realtime connection.");
+
+      void disposeFailedClient(nextClient, callbacks);
     },
 
     onWebSocketError() {
+      if (client !== nextClient) {
+        return;
+      }
+
       callbacks.onError("Could not connect to the SwordVerse realtime server.");
     },
 
-    onWebSocketClose() {
+    onWebSocketClose(event) {
+      if (client !== nextClient) {
+        return;
+      }
+
+      console.info(
+        "[SwordVerse WebSocket] Closed",
+        { code: event.code, reason: event.reason, wasClean: event.wasClean },
+      );
+
+      client = null;
       systemStatusSubscription = null;
+
+      if (event.code === 1008) {
+        callbacks.onError(
+          "Your SwordVerse authentication session is no longer active.",
+        );
+      }
+
       callbacks.onDisconnected();
     },
   });
 
-  client.activate();
+  client = nextClient;
+  nextClient.activate();
 }
 
+/**
+ * Disposes a rejected STOMP lifecycle before allowing another connection attempt. The client
+ * reference is cleared synchronously so late callbacks from the failed instance cannot own a new
+ * lifecycle.
+ */
+async function disposeFailedClient(
+  failedClient: Client,
+  callbacks: RealtimeCallbacks,
+): Promise<void> {
+  if (client !== failedClient) {
+    return;
+  }
+
+  client = null;
+  systemStatusSubscription = null;
+
+  try {
+    await failedClient.deactivate();
+  } finally {
+    callbacks.onDisconnected();
+  }
+}
+
+/** Publishes an authenticated diagnostic request for the current SwordVerse server status. */
 export function requestSystemStatus(): void {
   if (!client?.connected) {
     throw new Error("SwordVerse realtime connection is not ready.");
@@ -78,16 +146,24 @@ export function requestSystemStatus(): void {
   });
 }
 
+/**
+ * Gracefully unsubscribes and deactivates the current STOMP client. Calling it without an active
+ * client is safe.
+ */
 export async function disconnectRealtime(): Promise<void> {
+  const currentClient = client;
+
+  client = null;
+
   systemStatusSubscription?.unsubscribe();
   systemStatusSubscription = null;
 
-  if (client !== null) {
-    await client.deactivate();
-    client = null;
+  if (currentClient !== null) {
+    await currentClient.deactivate();
   }
 }
 
+/** Returns whether the singleton client has completed a STOMP CONNECT handshake. */
 export function isRealtimeConnected(): boolean {
   return client?.connected === true;
 }
