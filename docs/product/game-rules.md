@@ -206,14 +206,14 @@ MAIN_3
 SUPPORT
 ```
 
-Both Basic Actions start at level 1. Other Actions may begin locked:
+At the beginning of Round 1, both selected Basic Actions are level 1, all selected Sect Techniques are level 0, and `HP`, `STR`, `DEF`, and `AS` are level 1. Sect Techniques, including Passive Techniques and Ultimates, cannot be used or triggered while level 0:
 
 ```text
 currentLevel = 0  → locked
 currentLevel >= 1 → learned
 ```
 
-A selected but locked Action remains in the loadout and can be learned during Ascension. Every Action has a maximum level of 3.
+A selected locked Action remains in the loadout and can be learned during Ascension beginning in Round 2. Every Action and upgradeable Stat has a maximum level of 3.
 
 `MAIN` and `SUPPORT` describe loadout roles, not intrinsic Technique types.
 
@@ -279,7 +279,13 @@ Effects may restore or generate Qi, and every Qi-changing Effect must explicitly
 
 ## 6. Round Structure
 
-Each round contains:
+Round 1 contains:
+
+```text
+RENEWAL → ACTION STRATEGY → BATTLE
+```
+
+Round 2 and every later round contain:
 
 ```text
 RENEWAL → ASCENSION → ACTION STRATEGY → BATTLE
@@ -312,7 +318,7 @@ Effects at `RENEWAL_START` may change Qi before the transfer. Effects at `RENEWA
 
 ## 8. Ascension
 
-At the beginning of every round, each player receives 2 Learning Points.
+At the beginning of every Ascension Phase, each player receives 2 Learning Points. Round 1 has no Ascension Phase and no Learning Point allocation.
 
 Learning Points may be used to:
 

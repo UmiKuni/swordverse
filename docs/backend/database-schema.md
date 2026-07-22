@@ -125,7 +125,7 @@ current_level = 0  -> locked
 current_level >= 1 -> unlocked
 ```
 
-Selected Basic Actions start at level 1. Actions and upgradeable Stats have a maximum level of 3. Ascension may upgrade Actions and only the `HP`, `STR`, `DEF`, and `AS` Stats. Each Stat upgrade permanently increases the unmodified player Stat by 10%; upgrades are cumulative and temporary Effect modifiers are applied separately. `HP`, `STR`, and `DEF` increases are rounded up to an integer; `AS` increases are rounded up to two decimal places.
+In Round 1, selected Basic Actions and the upgradeable Stats start at level 1, while every selected Sect Technique starts at level 0. Actions and upgradeable Stats have a maximum level of 3. Ascension may upgrade Actions and only the `HP`, `STR`, `DEF`, and `AS` Stats. Each Stat upgrade permanently increases the unmodified player Stat by 10%; upgrades are cumulative and temporary Effect modifiers are applied separately. `HP`, `STR`, and `DEF` increases are rounded up to an integer; `AS` increases are rounded up to two decimal places.
 
 ---
 
@@ -728,7 +728,7 @@ Runtime rule:
 ```text
 current_level = 0 means locked.
 current_level >= 1 means unlocked.
-Basic Actions start at level 1.
+In Round 1, selected Basic Actions are level 1 and every selected Sect Technique is level 0.
 ```
 
 The `action_levels` table only stores actual configured levels, usually level 1 and above. Level 0 does not need a row.
@@ -1338,7 +1338,7 @@ ON rooms(player_b_id);
 
 The `matches` table stores the main runtime state of a match.
 
-A match is created from a room after both players are ready and connected. The match proceeds through pre-match selection, Renewal, Ascension, Action Strategy, Battle, and Game Over phases.
+A match is created from a room after both players are ready and connected. Round 1 proceeds through pre-match selection, Renewal, Action Strategy, Battle, and Game Over. Round 2 and later also include Ascension between Renewal and Action Strategy.
 
 Battle resolution is simultaneous on a shared timeline. One tick is 0.1 second, and there is no initiative field.
 
@@ -1574,6 +1574,7 @@ ON match_players(user_id);
 - `seat` has no gameplay priority. Battle is simultaneous on a shared 0.1-second timeline.
 - `main_sect_id` and `support_sect_id` are null until the corresponding pre-match selections are resolved.
 - The six selected Actions are stored only in `match_player_action_slots`; Action IDs are not duplicated in this table.
+- In Round 1, `str_level`, `hp_level`, `def_level`, and `as_level` are all 1. There is no Ascension allocation in that round.
 - Only `HP`, `STR`, `DEF`, and `AS` have Ascension upgrade levels. Qi is runtime state and has no Ascension level columns.
 - `HP`, `STR`, and `DEF` permanently increase as integers by 10%; two upgrades are cumulative because the second uses the first upgraded value. The server calculates `increase = ceil(stat_value * 0.10)`. `AS` is `numeric(10,2)` and uses `increase = ceil(as_value * 0.10 * 100) / 100`.
 - For an HP upgrade, `increase = ceil(hp_max * 0.10)`, `hp_max = hp_max + increase`, and `hp_current = min(hp_current + increase, hp_max)`. This immediately heals the player by the HP increase.
@@ -1622,7 +1623,7 @@ Action unlock state is represented by `current_level`.
 ```text id="h74wqo"
 current_level = 0 means locked.
 current_level >= 1 means unlocked.
-Selected Basic Actions start at level 1.
+In Round 1, selected Basic Actions start at level 1 and all selected Sect Techniques start at level 0.
 ```
 
 #### Columns
@@ -1692,8 +1693,7 @@ ON match_player_action_slots(action_id);
 
 - The service layer should create exactly six Action slots for each match player.
 - `BASIC_1` and `BASIC_2` must reference two distinct `actions.action_key` values selected from `SLASH`, `DEFEND`, and `SHIELD`.
-- Both Basic Action slots start at `current_level = 1`.
-- Main and Support Action slots may start at `current_level = 0` if the Action is locked.
+- In Round 1, both Basic Action slots start at `current_level = 1`, and every Main and Support Technique slot starts at `current_level = 0`.
 - `MAIN_1`, `MAIN_2`, and `MAIN_3` must be distinct Actions belonging to the selected Main Sect.
 - `SUPPORT` must belong to the selected Support Sect, must not duplicate a Main Action, and must reference an Action with `is_ultimate = false`.
 - Main and Support Sects may be the same.

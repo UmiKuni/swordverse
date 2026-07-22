@@ -122,7 +122,7 @@ MAIN_3
 SUPPORT
 ```
 
-Both selected Basic Actions start at level 1. Other Actions use:
+At Round 1 start, both selected Basic Actions and all upgradeable Stats are level 1. Every selected Sect Technique, including Passive Techniques and Ultimates, is level 0 and remains locked until learned during an Ascension Phase beginning in Round 2. Action levels use:
 
 ```text
 currentLevel = 0  -> locked
@@ -1065,7 +1065,8 @@ stateDiagram-v2
   PRE_MATCH_BASIC_SELECTION --> PRE_MATCH_MAIN_SECT_SELECTION
   PRE_MATCH_MAIN_SECT_SELECTION --> PRE_MATCH_SUPPORT_SELECTION
   PRE_MATCH_SUPPORT_SELECTION --> RENEWAL
-  RENEWAL --> ASCENSION
+  RENEWAL --> ACTION_STRATEGY: round 1
+  RENEWAL --> ASCENSION: round 2+
   ASCENSION --> ACTION_STRATEGY
   ACTION_STRATEGY --> BATTLE
   BATTLE --> RENEWAL
@@ -1129,7 +1130,7 @@ Every phase event contains:
 }
 ```
 
-`roundQiTransferred` is the amount moved into Reserve Qi before the new-round grant, and `discardedRoundQi` is the amount that did not fit. `effectChanges` includes Qi changes caused by Renewal Effects. The final `qi` object is authoritative and is emitted after the Renewal order defined in section 3.3. The server then emits `ASCENSION_STARTED` with `learningPoints: 2`.
+`roundQiTransferred` is the amount moved into Reserve Qi before the new-round grant, and `discardedRoundQi` is the amount that did not fit. `effectChanges` includes Qi changes caused by Renewal Effects. The final `qi` object is authoritative and is emitted after the Renewal order defined in section 3.3. In Round 1, the server emits `ACTION_STRATEGY_STARTED` directly. From Round 2 onward, it emits `ASCENSION_STARTED` with `learningPoints: 2`.
 
 ### 11.2 Confirm Ascension
 
@@ -1160,6 +1161,7 @@ Payload:
 
 Rules:
 
+- This command is valid only in Round 2 or later, when the match is in `ASCENSION`.
 - Total allocation is between 0 and 2 LP.
 - Stat targets are limited to `HP`, `STR`, `DEF`, and `AS`.
 - Stats and Actions have a maximum level of 3.
