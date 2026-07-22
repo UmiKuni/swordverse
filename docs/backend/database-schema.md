@@ -794,7 +794,7 @@ ON action_levels(action_id);
 - `learning_point_cost` is used during the Ascension Phase.
 - Active Sect Technique levels must define `base_duration_ticks`, `cooldown_ticks`, and `max_consecutive_stacks`; Passive Action levels leave these columns null. Basic Action levels use `cooldown_ticks = 0` and `max_consecutive_stacks = null` for unlimited consecutive use. This cross-table rule is enforced by the service layer.
 - One tick is exactly 0.1 second.
-- AS does not modify Action duration or cooldown. `SLASH`, `DEFEND`, and `SHIELD` have no cooldown; Main and Support Sect Techniques use their configured cooldown unchanged.
+- `base_duration_ticks` is the configured duration at `AS = 1`. For every queued Active Action occurrence, the server calculates `effective_duration_ticks = max(1, ceil(base_duration_ticks / current_as))` and uses that value to schedule the `(start, end]` interval and resolution timings. AS does not modify cooldown. `SLASH`, `DEFEND`, and `SHIELD` have no cooldown; Main and Support Sect Techniques use their configured cooldown unchanged.
 - For an Action with a configured cooldown, cooldown begins at the end of the final occurrence in a gapless stack chain. Each occurrence pays its own configured costs.
 - Dynamic Effects that modify another Action's duration or cooldown are intentionally not supported in the next version; the tick columns leave room for that future extension.
 - If a player has `current_level = 0`, the Action is locked and cannot be used.
@@ -1810,7 +1810,7 @@ ON action_queue_entries(match_player_id, round_number);
 - At runtime, the service layer checks ownership, Action level, activation type, cooldown, consecutive stack, costs, disabled state, and other execution requirements.
 - A runtime-invalid occurrence is changed to `EMPTY_RUNTIME`, its `action_slot_id` is cleared, and `runtime_failure_reason` records why. It pays no cost and produces no Action Effects.
 - Runtime conversion to `EMPTY_RUNTIME` must not stop the opponent's timeline.
-- `scheduled_start_tick` and `scheduled_end_tick` preserve deterministic `(start, end]` timing, including after an occurrence becomes `EMPTY_RUNTIME`, so later Actions do not shift. Action duration and cooldown are never modified by AS. Basic Actions have no cooldown; Sect Techniques use their configured cooldown unchanged.
+- `scheduled_start_tick` and `scheduled_end_tick` preserve deterministic `(start, end]` timing, including after an occurrence becomes `EMPTY_RUNTIME`, so later Actions do not shift. At queue confirmation, the server calculates each occurrence's effective duration as `max(1, ceil(base_duration_ticks / current_as))`; subsequent AS changes do not reschedule already-confirmed occurrences. AS does not modify cooldown. Basic Actions have no cooldown; Sect Techniques use their configured cooldown unchanged.
 - The service layer does not enforce an Action Queue entry-count or timeline-duration limit.
 - After round 1, a valid sequence is derived from the previous confirmed sequence by removing zero or one contiguous range, retaining the relative order of all remaining occurrences, and inserting new occurrences anywhere. The removed range must satisfy `removed_duration_ticks * 3 <= previous_confirmed_queue_duration_ticks`; this previous duration is the prior queue's total duration, not a capacity. Advisory validation reports violations without blocking confirmation; at runtime, violating occurrences are converted to `EMPTY_RUNTIME` with `QUEUE_TRANSITION_INVALID`.
 

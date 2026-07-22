@@ -29,7 +29,7 @@ Basic Actions have infinite Stack and no Cooldown.
 **- Description:** **Boost** the DEF stat by 100% while executing the Action.
 
 **- Effect Logic:** 
-`RESOLVE_DURING_ACTION`: **Boost** 100% DEF.
+`RESOLVE_DURING_EXECUTION`: **Boost** 100% DEF.
 
 ## 3 SECTS
 ### True Sword Sect - Chân Kiếm Phái
@@ -81,7 +81,7 @@ Basic Actions have infinite Stack and no Cooldown.
 ## 15 TECHNIQUES
 
 ### 1. Mindbound Edge - Liễm Thần Định Phong (True Sword Sect)
-**- Cost:** 50/80/100
+**- Cost:** 50/80/100 | **Activation type:** Active
 
 **- Duration:** 1s | **Cooldown:** 1s | **Stack:** 1
 
@@ -92,7 +92,7 @@ Basic Actions have infinite Stack and no Cooldown.
 `RESOLVE_ON_END`: **Deal** (150/200/250% x STR) damage.
 
 ### 2. Rising Reprisal - Thừa Kình Liêu Trảm (True Sword Sect)
-**- Cost:** 55/85/110
+**- Cost:** 55/85/110 | **Activation type:** Active
 
 **- Duration:** 1s | **Cooldown:** 1s | **Stack:** 1
 
@@ -105,21 +105,25 @@ Basic Actions have infinite Stack and no Cooldown.
 `RESOLVE_ON_END`: **Deal** (120/160/210% x STR) damage. If taken damage in (0.0, 1.0), **deal** additional (50% x STR) damage.
 
 ### 3. One Thought, Myriad Edges - Nhất Niệm Vạn Kiếm (True Sword Sect)
-**- Cost:** 70/90/120
+**- Cost:** 70/90/120 | **Activation type:** Active
 
-**- Duration:** 2s | **Cooldown:** 1s | **Stack:** 1
+**- Duration:** 3/4/5 x 0.5s | **Cooldown:** 1s | **Stack:** 1
 
-**- Description:** Focus the mind upon a single thought. Then, release a flurry of (AS x 2) strikes that **deal** (90/120/160% x STR) damage each strikes.
+**- Description:** Focus the mind upon a single thought. Then, release 3/4/5 precise consecutive strikes that **deal** (90/120/160% x STR) damage each strikes for every 0.5s. After finished, **gain** 10% Max HP Barrier for the rest of the round.
 
 **- Effect Logic:**
 
-`RESOLVE_DURING_EXECUTION`: **Deal** (90/120/160% x STR) damage for every (1 / (AS x 2)) seconds, with minimum 1 strike and maximum 20 strikes.
+`RESOLVE_DURING_EXECUTION`: **Deal** (90/120/160% x STR) damage for every 0.5 seconds, with 3/4/5 strike.
+
+`RESOLVE_ON_END`: **Gain** 10% Max HP Barrier.
 
 ### 4. Tempered Harmony - Cương Nhu Hỗn Thành (True Sword Sect)
+**Activation type:** Passive
+
 **Description:** Each round, whenever the performer deals damage to the opponent, **gain** 1 stack of **Intent**, up to 6 stacks. Each stack of **Intent** increases DEF by 5%/6%/7%. Upon reaching 6 stacks, immediately **gain** 10%/15%/20% STR.
 
 ### 5. Egoless Revelation - Vô Ngã Chứng Chân (True Sword Sect)
-**- Cost:** 60/80/100
+**- Cost:** 60/80/100 | **Activation type:** Active - Ultimate
 
 **- Duration:** 0.5s | **Cooldown:** 4s | **Stack:** 1
 
@@ -132,7 +136,7 @@ Basic Actions have infinite Stack and no Cooldown.
 `RESOLVE_ON_END`: If this is the 2nd activation, **deal** (150%/200%/250% x STR) damage and additional (50% x STR) damage for each stack of *"Intent"*.
 
 ### 6. White Rainbow Pierces the Sun - Bạch Hồng Quán Nhật (Flying Sword Sect)
-**- Cost:** 40/60/90
+**- Cost:** 40/60/90 | **Activation type:** Active
 
 **- Duration:** 1/AS(Attack Speed)s | **Cooldown:** 1s | **Stack:** 1
 
@@ -144,49 +148,50 @@ Basic Actions have infinite Stack and no Cooldown.
 `RESOLVE_ON_END`: **Deal** (120/150/190% x STR) damage. Considered as a **Slash**.
 
 ### 7. Heavenly Sword Circuit - Kiếm Luân Chu Thiên (Flying Sword Sect)
-**- Cost:** 60/90/130
+**- Cost:** 60/90/130 | **Activation type:** Active
 
 **- Duration:** 0.5s | **Cooldown:** 4s | **Stack:** 1
 
-**- Description:** Circulate and weave the power of the flying swords into an unbroken cycle. Then, **gain** 10/15/20% STR and 20/50/100% AS and recover 30/40/50 Qi.
+**- Description:** Circulate and weave the power of the flying swords into an unbroken cycle. Then, **gain** 10/15/20% STR and 20/30/40% AS and recover 30/40/50 Qi.
 
 **- Effect Logic:** 
 
-`RESOLVE_ON_END`: **Gain** 10/15/20% STR, 20/50/100% AS and **Recover** 30/40/50 Qi.
+`RESOLVE_ON_END`: **Gain** 10/15/20% STR, 20/30/40% AS and **Recover** 30/40/50 ROUND_QI.
 
 ### 8. River of Myriad Blades - Vạn Kiếm Trường Hà (Flying Sword Sect)
-**- Cost:** 100/130/170
+**- Cost:** 100/130/170 | **Activation type:** Active
 
 **- Duration:** (**X** x 0.3)s | **Cooldown:** 3s | **Stack:** 1
 
-**- Description:** Converge the flying swords into an unbroken stream, then unleash a relentless assault that deals (110/130/160% x STR) damage with **X**(4 x AS rounded up) strikes. Each strike will apply 1 **Bleed** to the target.
+**- Description:** Converge the flying swords into an unbroken stream, then unleash a relentless assault that deals (45%/55%/70% x STR) damage with **X**(4 x AS rounded up) strikes. Each strike will apply 1 **Bleed** to the target.
 
 **- Effect Logic:** 
 `RESOLVE_DURING_EXECUTION`: **Deal** (110/130/160% x STR) damage and apply 1 **Bleed** for every 0.3 seconds, with minimum 1 strike. (Total strike count = 4 x AS rounded up)
 
 ### 9. Threefold Sundering - Tam Điệp Phá Cương (Flying Sword Sect)
-**Description:** For every 3 consecutive **Slash**es, the 3th **Slash** will **deal** additional (50/70/100% x STR) damage and this **Slash** damage will become **Direct Damage**.
+**Activation type:** Passive
+
+**Description:** For every 3 consecutive **Slash**es, the 3rd **Slash** will **deal** additional (50/70/100% x STR) damage and this **Slash** damage will become **Direct Damage**.
 
 ### 10. Myriad Blades Crown the Ascendant - Vạn Kiếm Triều Tiên (Flying Sword Sect)
-**- Cost:** 150/180/230
+**- Cost:** 150/180/230 | **Activation type:** Active - Ultimate
 
 **- Duration:** 1s | **Cooldown:** 6s | **Stack:** 1
 
-**- Description:** Converge the flying swords to **gain** (5/7/10% HP) Barrier and empower them with the aura of **Ascendance**. While in **Ascendance**, the performer will **gain** 50%/90%/150% AS and whenever the performer **deal** damage successfully, apply 1 **Bleed** to the target. And in the end of Battle Phase, after all **Bleed** resolved, each successful **Bleed** will deal (7% x STR) damage to the target.
+**- Description:** Converge the flying swords to **gain** (5/7/10% Max HP) Barrier and empower them with the aura of **Ascendance**. While in **Ascendance**, the performer will **gain** 30%/50%/70% AS and whenever the performer **deal** damage successfully, apply 1 **Bleed** to the target. And in the end of Battle Phase, after all **Bleed** resolved, each successful **Bleed** will deal (7% x STR) damage to the target.
 
 **- Effect Logic:** 
 
 `RESOLVE_ON_START`: **Gain** 5/7/10% HP Barrier.
 
-`RESOLVE_ON_END`: **Gain** **Ascendance**
+`RESOLVE_ON_END`: **Gain** 30%/50%/70% AS and **Ascendance**
 
 While in Ascendance:
-- **Gain** 50%/90%/150% AS.
 - Whenever the performer **deal** damage successfully, apply 1 **Bleed** to the target.
-- In the end of Battle Phase, before **Ascendance** removed and after all **Bleed** resolved, each successful **Bleed** will **deal** (7% x STR) damage to the target.
+- At the end of the Battle Phase, each **Bleed** resolved will be stored in `RESOLVED_BLEED_COUNT`. Then, **deal** (7% x `RESOLVED_BLEED_COUNT` x STR) damage.
 
 ### 11. Ambush - Tập (Shadow Sword Sect)
-**- Cost:** 100/120/150
+**- Cost:** 100/120/150 | **Activation type:** Active
 
 **- Duration:** 1.5s | **Cooldown:** 1.5s | **Stack:** 1
 
@@ -201,13 +206,13 @@ While in Ascendance:
 `RESOLVE_ON_END`: **Deal** (180%/210%/250% x STR) damage. If the target is under **Shield** or **Defend**, **deal** additional (60%/70%/80% x STR) damage.
 
 ### 12. Phantasm - Huyễn (Shadow Sword Sect)
-**- Cost:** 50/70/100
+**- Cost:** 50/70/100 | **Activation type:** Active
 
 **- Duration:** 0.7s | **Cooldown:** 1.5s | **Stack:** 2
 
 **- Description:** 
 1st stack: Consume 1 **Shade** to unleash illusion strike that **deal** (150%/170%/200% x STR) damage.
-2nd stack: Consume 2 **Shade**s to release a dazling strike that **deal** (200%/250%/300% x STR) damage then **gain** 5%/10%/15% STR.
+2nd stack: Consume 2 **Shade**s to release a dazzling strike that **deal** (200%/250%/300% x STR) damage then **gain** 5%/10%/15% STR.
 
 **- Effect Logic:**
 `RESOLVE_ON_START`: Check the current stacks:
@@ -215,16 +220,17 @@ While in Ascendance:
 2nd: Consume 2 **Shade**s to **deal** (200%/250%/300% x STR) damage then **gain** 5%/10%/15% STR.
 
 ### 13. Rend - Liệt (Shadow Sword Sect)
-**- Cost:** 50/70/100
+**- Cost:** 50/70/100 | **Activation type:** Active
 
 **- Duration:** 0.5s | **Cooldown:** 3s | **Stack:** 1
 
-**- Description:** Instantly flash past the target, leaving behind a swift slash that deal (50%/70%/100% x STR) damage, then consume 1 **Shade** to reduce the target’s DEF by 13/16/20 for the rest of the round.
+**- Description:** Instantly flash past the target, leaving behind a swift slash that deal (50%/70%/100% x STR) damage, then consume 1 **Shade** to reduce the target’s DEF by 13/15/18 for the rest of the round.
 
 **- Effect Logic:**
 `RESOLVE_ON_START`: **Deal** (50%/70%/100% x STR) damage, then consume 1 **Shade** to reduce the target’s DEF by 13/15/18.
 
 ### 14. Predation - Liệp (Shadow Sword Sect)
+**Activation type:** Passive
 
 **Description:** At the start of each *Shadow Sword Action*, before effect triggered, if the opponent is below 50% Health, **gain** 1 stack of **Shade**. **Shade** has a maximum of 4 stacks.
 
@@ -240,7 +246,7 @@ Whenever an Action consumes **Shade**, **boost** all damage dealt by that Action
 If the current Action consumes one or more stacks of **Shade**, **boost** its damage by 6%/8%/10% for each stack consumed.
 
 ### 15. Eclipse - Thực (Shadow Sword Sect)
-**- Cost:** 150/200/250
+**- Cost:** 150/200/250 | **Activation type:** Active - Ultimate
 
 **- Duration:** 1.5s | **Cooldown:** 7s | **Stack:** 1
 
@@ -291,4 +297,3 @@ The target will increase an amount of X type of resource. The resource can be Qi
 ## Shadow
 **Shadow** is a special state that ignores all **Slash** from others.
 
-<span style="color: orange;"></span>
