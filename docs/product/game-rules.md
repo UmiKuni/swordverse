@@ -61,7 +61,7 @@ PASSIVE
 
 Only learned Active Actions may be placed in the Action Queue. Passive Actions activate automatically when server-observed conditions are met and cannot be add into the Action Queue.
 
-Note that an **Ultimate Action** can only be selected as a Main Technique.
+An **Ultimate Action** is always `ACTIVE`, can only be selected as a Main Technique, and cannot be selected as the Support Action.
 
 ### 3.3 Active Action resolution types
 
@@ -92,13 +92,17 @@ Each Action level defines:
 
 Time is represented by integer ticks. One tick is `0.1` second.
 
-AS modifies an Active Action's execution duration. `baseDurationTicks` is the configured duration at `AS = 1`; the server calculates the effective duration for each queued occurrence as:
+AS modifies an Active Action's execution duration. `baseDurationTicks` is the configured duration at `AS = 1`. When an occurrence reaches its runtime start position, the server snapshots the performer's strictly positive current AS as `asSnapshot`, then calculates:
 
 ```text
-effectiveDurationTicks = max(1, ceil(baseDurationTicks / currentAS))
+effectiveDurationTicks = max(1, ceil(baseDurationTicks / asSnapshot))
 ```
 
-The server uses `effectiveDurationTicks` when scheduling the Action's `(start, end]` interval and its resolution timings. Rounding up preserves the integer `0.1`-second tick timeline, and an Action can never be shorter than one tick.
+The server schedules that occurrence's `(start, end]` interval and all of its resolution timings from `effectiveDurationTicks`. It then performs runtime validation and atomically checks costs. A valid occurrence executes across the calculated interval; an invalid occurrence becomes `EMPTY_SLOT` but retains that interval. The next occurrence on the same player's timeline begins after that interval ends.
+
+Each player's queue is scheduled incrementally during Battle. Both players still share one deterministic timeline, but AS gained during Battle can affect the duration of later occurrences that have not started. It never reschedules an occurrence that has started. Rounding up preserves the integer `0.1`-second tick timeline, and an Action can never be shorter than one tick.
+
+An Action with a documented controlled custom duration calculates that duration at runtime instead of using the default formula and must not apply the default formula a second time.
 
 `SLASH`, `DEFEND`, and `SHIELD` are Basic Actions with no cooldown. Main and Support Sect Techniques may define cooldowns, measured in `0.1`-second ticks. AS does not modify cooldowns.
 
@@ -120,6 +124,8 @@ An Action may create an Effect whose lifetime differs from the Action's executio
 
 Shield does not create a persistent shield Effect. It has a configured base duration of 1 second and, through `RESOLVE_DURING_EXECUTION`, Boosts the performer's DEF by 100% throughout its effective `(start, end]` interval. The DEF Boost is removed when the Action ends.
 
+Defend is also execution-bound. It has a configured base duration of 1 second and, through `RESOLVE_DURING_EXECUTION`, ignores incoming Slash damage only throughout its effective `(start, end]` interval. Its protection ends when the Action ends.
+
 Actions or Effects that dynamically change another Action's duration or cooldown are reserved for a future version and are not implemented in the next version.
 
 ### 3.7 Passive Actions
@@ -134,6 +140,16 @@ Example conditions include:
 - Gain or lose a specified Effect.
 
 Passive progress is current runtime state, not Battle history. A three-hit passive needs only its current counter, not a log of every previous hit.
+
+`ACTION_STARTED` is the canonical event emitted when an Active Action begins. For a Shadow Sword Action, the server resolves events in this order:
+
+1. Emit `ACTION_STARTED`.
+2. Resolve applicable Passive triggers, including Predation.
+3. Apply any Shade gained by those triggers.
+4. Resolve the Active Action's `RESOLVE_ON_START` Effects.
+5. Allow the Action to consume Shade.
+
+The internal authoritative `ACTION_STARTED` event may also have a public server-event representation. The public event reveals the occurrence, not hidden Passive trigger configuration.
 
 ## 4. Pre-Match Selection
 
@@ -342,7 +358,7 @@ Rules:
 
 ### 9.1 Queue length
 
-An Action Queue has no maximum number of Action occurrences and no maximum timeline duration. An Action's configured duration still determines when its occurrence resolves, but the complete queue may use any number of ticks.
+An Action Queue has no maximum number of Action occurrences and no maximum timeline duration. Each occurrence's runtime AS snapshot and effective duration determine when it resolves, but the complete queue may use any number of ticks.
 
 ### 9.2 Eligible Actions
 
@@ -365,21 +381,21 @@ nextQueue = insertNewActions(removeContiguousRange(previousConfirmedQueue))
 Rules:
 
 1. Remove zero or one contiguous range of occurrences from the previous confirmed queue.
-2. The removed range's total effective duration must satisfy `removedDurationTicks * 3 <= previousConfirmedQueueDurationTicks`.
+2. The removed range's total effective duration must satisfy `removedDurationTicks * 3 <= previousResolvedQueueDurationTicks`.
 3. Preserve the relative order of all retained occurrences.
 4. Insert newly selected occurrences at the beginning, end, or between retained occurrences.
 5. Check the complete resulting queue against cooldown, stack, transition, and eligibility rules.
 
-`previousConfirmedQueueDurationTicks` is the total effective duration of the player's confirmed queue in the previous round, not a Queue capacity. In round 1, there is no previous queue and no removal rule.
+`previousResolvedQueueDurationTicks` is the previous round's authoritative resolved duration, including the reserved duration of any `EMPTY_SLOT` occurrences. It is not a Queue capacity. In round 1, there is no previous queue and no removal rule.
 
 ### 9.4 Queue validation
 
-Before confirming, a player may request an authoritative preview validation of the current queue any number of times. Checking does not confirm or lock the queue, and its result is advisory because runtime state may change before an Action executes.
+Before confirming, a player may request an authoritative preview validation of the current queue any number of times. Checking does not confirm or lock the queue, and its result is advisory because runtime state may change before an Action executes. Preview durations are estimates calculated with the player's AS at the time of the check; Battle events provide the authoritative runtime durations.
 
 The server returns whether the queue is valid and all detected violations, including the relevant Action occurrence where possible:
 
 ```text
-COUNTDOWN_INVALID
+COOLDOWN_INVALID
 QUEUE_TRANSITION_INVALID
 ```
 
@@ -407,7 +423,7 @@ Invalid Action occurrences are handled during Battle rather than during confirma
 
 Both queues start at time `0` and execute on the same timeline. One tick is `0.1` second.
 
-Actions within each player's queue execute sequentially. Because Actions may have different durations, the two players' Action boundaries do not need to align. There is no initiative and no alternating turn order.
+Actions within each player's queue execute sequentially and are scheduled incrementally. Because Actions may have different durations and AS may change during Battle, the two players' Action boundaries do not need to align. There is no initiative and no alternating turn order.
 
 Every Action occupies the interval:
 
@@ -421,7 +437,7 @@ All events scheduled for the same timeline point are resolved by deterministic s
 
 ### 10.2 Runtime Action validation
 
-The server validates each Action occurrence when Battle reaches it, using the actual runtime state. Runtime validation includes Action eligibility, cooldown, stack, configured cost, and any other execution requirements.
+When an occurrence reaches its runtime start position, the server snapshots AS, calculates and reserves its interval, then validates it using the actual runtime state. Runtime validation includes Action eligibility, cooldown, stack, configured cost, and any other execution requirements.
 
 If an occurrence is invalid:
 
@@ -463,6 +479,7 @@ EMPTY_SLOT
 Battle resolution emits internal gameplay events such as:
 
 ```text
+ACTION_STARTED
 ACTION_HIT
 DAMAGE_DEALT
 DAMAGE_RECEIVED
@@ -483,6 +500,21 @@ Effects may be:
 - Infinite until removed.
 
 Effects may use configured stacking, refresh, replacement, priority, lifetime, charge, trigger, and removal rules.
+
+For an `RESOLVE_DURING_EXECUTION` Action-Effect mapping, `periodIntervalTicks` may define a repeating cadence. It is null for non-periodic mappings and at least 1 when present. The first periodic resolution occurs after one complete interval, and subsequent resolutions occur every interval; an endpoint-aligned resolution occurs at the inclusive endpoint. The server uses the Action's already calculated execution interval and never resolves a periodic Effect after that endpoint.
+
+### 10.7 Battle-end Effects
+
+After all timeline Actions finish and no player has reached 0 HP, the server resolves `BATTLE_END` Effects in this order:
+
+1. Resolve Ending Effects in deterministic application order.
+2. Resolve Bleed stacks.
+3. Record relevant resolved Bleed stacks for follow-up Effects.
+4. Resolve Ascendance follow-up damage.
+5. Remove round-scoped Gain Effects.
+6. Evaluate match-end conditions, then start the next-round transition when no terminal condition exists.
+
+If HP reaches 0 during Battle, the existing immediate match-end policy applies: remaining timeline Actions and `BATTLE_END` Effects do not resolve.
 
 ## 11. Match End Conditions
 

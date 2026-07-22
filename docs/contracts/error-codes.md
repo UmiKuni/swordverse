@@ -29,3 +29,11 @@ Gameplay ownership errors are not authentication failures and must not cause aut
 ## 4. Validation and Domain Errors
 
 The complete domain-error list is maintained in [Section 14 of the API and WebSocket contract](api-websocket-contract.md#14-error-codes). When a new public error is introduced, both the relevant contract operation and this registry must be updated.
+
+## 5. Action Queue Runtime Results
+
+| Code | Meaning | Client behavior |
+|---|---|---|
+| `COOLDOWN_INVALID` | An Action occurrence violates cooldown or consecutive-stack timing. | Show it in advisory queue validation or render the runtime occurrence as `EMPTY_SLOT`; do not treat it as a command rejection. |
+
+`EMPTY_SLOT` is the public runtime status. The database stores the corresponding persistence state as `EMPTY_RUNTIME`.

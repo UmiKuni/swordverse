@@ -135,13 +135,13 @@ Only unlocked Actions with `activationType = ACTIVE` are valid executable queue 
 
 An active Action slot may appear multiple times in the same queue. Passive Actions cannot be queued. They activate automatically when their configured gameplay-event conditions are satisfied.
 
-An Action Queue has no maximum number of occurrences and no maximum timeline duration. Each Action retains its configured duration, but the complete queue may use any number of ticks.
+An Action Queue has no maximum number of occurrences and no maximum timeline duration. Each occurrence receives its effective duration at runtime, but the complete queue may use any number of ticks.
 
-One tick is `0.1` second. Actions occupy `(startTick, endTick]`, and AS does not modify any Action's duration. `SLASH`, `DEFEND`, and `SHIELD` are Basic Actions with unlimited consecutive uses and no cooldown. Sect Techniques use their configured cooldown unchanged by AS.
+One tick is `0.1` second. Actions occupy `(startTick, endTick]`. At an occurrence's runtime start position, the server snapshots strictly positive `currentAS` as `asSnapshot`, calculates `effectiveDurationTicks = max(1, ceil(baseDurationTicks / asSnapshot))`, reserves the interval, then validates the occurrence and atomically checks costs. Invalid occurrences become `EMPTY_SLOT` and retain the interval calculated from `asSnapshot`. Each player's queue is scheduled incrementally, so AS gained during Battle may affect later occurrences that have not started. AS does not modify cooldown values directly. `SLASH`, `DEFEND`, and `SHIELD` are Basic Actions with unlimited consecutive uses and no cooldown. Sect Techniques use their configured cooldown unchanged by AS.
 
 Before confirming, the client may request an advisory queue check. It reports cooldown, stack, transition, ownership, level, and activation-type violations. It never checks resource sufficiency and does not confirm, lock, or block the queue.
 
-After round 1, the player may remove zero or one contiguous range of occurrences from the previous confirmed queue. The removed duration must satisfy `removedDurationTicks * 3 <= previousConfirmedQueueDurationTicks`; retained occurrences keep their relative order, and newly selected Actions may be inserted anywhere. `previousConfirmedQueueDurationTicks` is the prior confirmed queue's total duration, not a Queue limit.
+After round 1, the player may remove zero or one contiguous range of occurrences from the previous confirmed queue. The removed duration must satisfy `removedDurationTicks * 3 <= previousResolvedQueueDurationTicks`; retained occurrences keep their relative order, and newly selected Actions may be inserted anywhere. `previousResolvedQueueDurationTicks` is the prior round's authoritative resolved duration, including reserved `EMPTY_SLOT` intervals, not a Queue limit.
 
 ### 3.3 Runtime resources
 
@@ -172,7 +172,7 @@ During Renewal, the server:
 
 Both Action Queues resolve simultaneously on the same 0.1-second timeline. Actions within one player's queue are sequential, but the two players' Action boundaries may differ. There is no initiative or alternating turn order.
 
-Every occurrence is checked against actual runtime state. If it is invalid, cannot pay its cost, or is disabled, it becomes `EMPTY_SLOT`, produces no Effects, and keeps its scheduled interval so later Actions do not shift. The opposing timeline continues.
+Every occurrence is checked against actual runtime state after its AS snapshot and interval are calculated. If it is invalid, cannot pay its cost, or is disabled, it becomes `EMPTY_SLOT`, produces no Effects, and keeps its scheduled interval so later Actions do not shift. The opposing timeline continues. In persistence, `EMPTY_RUNTIME` represents this public `EMPTY_SLOT` runtime status.
 
 Passive Actions may trigger from gameplay events produced during resolution. Passive results are included in timeline resolution events; Passive Actions are never valid executable queue entries.
 
@@ -1200,7 +1200,7 @@ Private response:
   "payload": {
     "valid": false,
     "totalDurationTicks": 34,
-    "previousConfirmedQueueDurationTicks": 30,
+    "previousResolvedQueueDurationTicks": 30,
     "removedDurationTicks": 12,
     "occurrences": [
       {
@@ -1216,16 +1216,16 @@ Private response:
       {
         "code": "QUEUE_TRANSITION_INVALID",
         "sequenceIndex": null,
-        "details": { "previousConfirmedQueueDurationTicks": 30, "removedDurationTicks": 12 }
+        "details": { "previousResolvedQueueDurationTicks": 30, "removedDurationTicks": 12 }
       }
     ]
   }
 }
 ```
 
-The check is advisory. It does not persist, confirm, lock, reject, or alter the queue. It reports every detectable non-resource violation, including `COUNTDOWN_INVALID`, `ACTION_NOT_OWNED`, `ACTION_LOCKED`, `ACTION_NOT_QUEUEABLE`, and `QUEUE_TRANSITION_INVALID`. It never checks QI, HP, or any other Action cost.
+The check is advisory. It does not persist, confirm, lock, reject, or alter the queue. It reports every detectable non-resource violation, including `COOLDOWN_INVALID`, `ACTION_NOT_OWNED`, `ACTION_LOCKED`, `ACTION_NOT_QUEUEABLE`, and `QUEUE_TRANSITION_INVALID`. It never checks QI, HP, or any other Action cost. `totalDurationTicks`, occurrence boundaries, and `effectiveDurationTicks` are estimates calculated using AS at the time of the check; runtime Battle events are authoritative.
 
-AS does not modify Action duration or cooldown. `SLASH`, `DEFEND`, and `SHIELD` have no cooldown. Sect Techniques use `baseCooldownTicks` unchanged, and every Action duration uses `baseDurationTicks` unchanged.
+AS modifies duration through the runtime `asSnapshot` formula. `SLASH`, `DEFEND`, and `SHIELD` have no cooldown. Sect Techniques use `baseCooldownTicks` unchanged by AS, though a shorter Action can cause its cooldown window to begin earlier.
 
 ### 11.4 Confirm Action Queue
 
@@ -1281,6 +1281,7 @@ Errors are limited to command-level failures such as `INVALID_MATCH_PHASE`, `MAL
     "actionId": "737cb9aa-f0c8-4180-a9c8-a94fe9e0de7d",
     "actionKey": "SLASH",
     "resolutionTypes": ["RESOLVE_ON_END"],
+    "asSnapshot": 1.25,
     "startTick": 0,
     "endTick": 10,
     "effectiveDurationTicks": 10,
@@ -1289,7 +1290,7 @@ Errors are limited to command-level failures such as `INVALID_MATCH_PHASE`, `MAL
 }
 ```
 
-Action duration is never AS-adjusted. Basic Actions have no cooldown; Sect Technique cooldowns use their configured values unchanged. `RESOLVE_ON_START` Effects resolve at `startTick + 1`, `RESOLVE_DURING_EXECUTION` Effects remain active for the complete `(startTick, endTick]` interval, and `RESOLVE_ON_END` Effects resolve at `endTick`.
+`ACTION_STARTED` is the public representation of the internal authoritative `ACTION_STARTED` gameplay event. It reveals the occurrence and its authoritative `asSnapshot` and duration, but never exposes server-only Passive trigger configuration. Basic Actions have no cooldown; Sect Technique cooldowns use their configured values unchanged by AS. `RESOLVE_ON_START` Effects resolve at `startTick + 1`, `RESOLVE_DURING_EXECUTION` Effects remain active for the complete `(startTick, endTick]` interval, and `RESOLVE_ON_END` Effects resolve at `endTick`.
 
 ### 12.2 Timeline point resolved
 
@@ -1331,7 +1332,7 @@ Action duration is never AS-adjusted. Basic Actions have no cooldown; Sect Techn
 Runtime-invalid occurrences use `status = EMPTY_SLOT` and one of these `failureReason` values:
 
 ```text
-COUNTDOWN_INVALID
+COOLDOWN_INVALID
 INSUFFICIENT_RESOURCE
 ACTION_NOT_OWNED
 ACTION_LOCKED
@@ -1344,7 +1345,9 @@ An empty occurrence retains its scheduled interval, pays no cost, and produces n
 
 ### 12.3 Round and match completion
 
-If no terminal condition exists after both timelines complete, the server emits `ROUND_ENDED` and starts the next Renewal.
+If no terminal condition exists after both timelines complete, the server resolves internal `BATTLE_END` Effects in the product-defined deterministic order, includes their resulting state changes in the relevant server events, then emits `ROUND_ENDED` and starts the next Renewal. `BATTLE_END` is not a public trigger-configuration payload.
+
+If HP reaches 0 during Battle, the immediate match-end policy prevents remaining timeline Actions and `BATTLE_END` Effects from resolving.
 
 Match result reasons:
 
@@ -1446,7 +1449,7 @@ Surrender is valid in every match phase except `GAME_OVER`. It immediately creat
 | `INVALID_ASCENSION_TARGET`        | Ascension target is invalid or ineligible.                                                                       |
 | `ACTION_LEVEL_MAX`                | Action cannot be upgraded further.                                                                               |
 | `STAT_LEVEL_MAX`                  | Upgradeable Stat is already level 3.                                                                             |
-| `COUNTDOWN_INVALID`               | Advisory/runtime result: cooldown or consecutive-stack timing is invalid.                                        |
+| `COOLDOWN_INVALID`                | Advisory/runtime result: cooldown or consecutive-stack timing is invalid.                                        |
 | `INSUFFICIENT_RESOURCE`           | Runtime result: actual resources cannot pay the Action cost. This is never returned by queue preview validation. |
 | `ACTION_NOT_OWNED`                | Advisory/runtime result: Action slot does not belong to the caller.                                              |
 | `ACTION_LOCKED`                   | Advisory/runtime result: Action has level 0.                                                                     |
@@ -1579,7 +1582,7 @@ export interface ConfirmActionQueuePayload {
 export type CheckActionQueuePayload = ConfirmActionQueuePayload;
 
 export type QueueViolationCode =
-  | "COUNTDOWN_INVALID"
+  | "COOLDOWN_INVALID"
   | "ACTION_NOT_OWNED"
   | "ACTION_LOCKED"
   | "ACTION_NOT_QUEUEABLE"
@@ -1594,7 +1597,7 @@ export interface QueueViolation {
 export interface ActionQueueCheckResult {
   valid: boolean;
   totalDurationTicks: number;
-  previousConfirmedQueueDurationTicks: number | null;
+  previousResolvedQueueDurationTicks: number | null;
   removedDurationTicks: number;
   violations: QueueViolation[];
 }
@@ -1622,6 +1625,8 @@ export interface ServerEvent<TPayload> {
 ## 16. Spring Boot DTO Reference
 
 ```java
+import java.math.BigDecimal;
+
 public enum ActionSource {
     BASIC, SECT_TECHNIQUE
 }
@@ -1654,7 +1659,7 @@ public record PlayerState(
     Map<String, Integer> statLevels,
     int str,
     int def,
-    int as,
+    BigDecimal as,
     CappedValue hp,
     QiState qi
 ) {}
@@ -1687,7 +1692,7 @@ public record CheckActionQueuePayload(
 ) {}
 
 public enum QueueViolationCode {
-    COUNTDOWN_INVALID,
+    COOLDOWN_INVALID,
     ACTION_NOT_OWNED,
     ACTION_LOCKED,
     ACTION_NOT_QUEUEABLE,
@@ -1703,7 +1708,7 @@ public record QueueViolation(
 public record ActionQueueCheckResult(
     boolean valid,
     int totalDurationTicks,
-    Integer previousConfirmedQueueDurationTicks,
+    Integer previousResolvedQueueDurationTicks,
     int removedDurationTicks,
     List<QueueViolation> violations
 ) {}

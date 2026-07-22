@@ -618,6 +618,10 @@ CHECK (
 CHECK (is_ultimate = false OR action_source = 'SECT_TECHNIQUE')
 ```
 
+```sql
+CHECK (is_ultimate = false OR activation_type = 'ACTIVE')
+```
+
 #### Relationships
 
 | Relationship | Description |
@@ -628,7 +632,7 @@ CHECK (is_ultimate = false OR action_source = 'SECT_TECHNIQUE')
 
 #### Notes
 
-- `action_source`, `activation_type`, and `resolution_types` are separate classifications. An Ultimate may be active or passive.
+- `action_source`, `activation_type`, and `resolution_types` are separate classifications. An Ultimate is always `ACTIVE`.
 - An Active Action has one to three distinct resolution types. The service layer rejects duplicate values and ensures every Action Effect mapping uses a type declared by its Action.
 - Only `ACTIVE` Actions may be added to the Action Queue.
 - `PASSIVE` Actions are evaluated from gameplay events and cannot be queued.
@@ -794,7 +798,7 @@ ON action_levels(action_id);
 - `learning_point_cost` is used during the Ascension Phase.
 - Active Sect Technique levels must define `base_duration_ticks`, `cooldown_ticks`, and `max_consecutive_stacks`; Passive Action levels leave these columns null. Basic Action levels use `cooldown_ticks = 0` and `max_consecutive_stacks = null` for unlimited consecutive use. This cross-table rule is enforced by the service layer.
 - One tick is exactly 0.1 second.
-- `base_duration_ticks` is the configured duration at `AS = 1`. For every queued Active Action occurrence, the server calculates `effective_duration_ticks = max(1, ceil(base_duration_ticks / current_as))` and uses that value to schedule the `(start, end]` interval and resolution timings. AS does not modify cooldown. `SLASH`, `DEFEND`, and `SHIELD` have no cooldown; Main and Support Sect Techniques use their configured cooldown unchanged.
+- `base_duration_ticks` is the configured duration at `AS = 1`. When an Active Action occurrence reaches its runtime start position, the server snapshots strictly positive `current_as` as `as_snapshot`, calculates `effective_duration_ticks = max(1, ceil(base_duration_ticks / as_snapshot))`, and uses that value to schedule the `(start, end]` interval and resolution timings. AS does not modify cooldown. `SLASH`, `DEFEND`, and `SHIELD` have no cooldown; Main and Support Sect Techniques use their configured cooldown unchanged.
 - For an Action with a configured cooldown, cooldown begins at the end of the final occurrence in a gapless stack chain. Each occurrence pays its own configured costs.
 - Dynamic Effects that modify another Action's duration or cooldown are intentionally not supported in the next version; the tick columns leave room for that future extension.
 - If a player has `current_level = 0`, the Action is locked and cannot be used.
@@ -912,6 +916,7 @@ UNIQUE (action_level_id, sequence_order)
 CHECK (
   event_type IN (
     'ACTION_HIT',
+    'ACTION_STARTED',
     'DAMAGE_DEALT',
     'DAMAGE_RECEIVED',
     'ATTRIBUTE_CHANGED',
@@ -940,6 +945,7 @@ CHECK (sequence_order >= 0)
 - `filter_config` is not arbitrary untyped state. Each `event_type` maps to a dedicated Java DTO and validator.
 - A three-hit passive uses `ACTION_HIT`, `EVENT_COUNT`, `ACCUMULATE`, threshold `3`, and `ON_TRIGGER`.
 - A passive triggered by losing at least 2 HP from one hit uses `DAMAGE_RECEIVED`, `EVENT_VALUE`, `SINGLE_EVENT`, and threshold `2`.
+- Predation uses `ACTION_STARTED` with a validated Shadow Sword Action filter. The battle engine resolves matching Passive triggers and applies their Shade before the Active Action's `RESOLVE_ON_START` Effects can consume it.
 - The engine enforces maximum trigger depth and maximum events per tick to prevent passive loops.
 
 ---
@@ -1016,7 +1022,7 @@ CHECK (max_charges IS NULL OR max_charges >= 1)
 ```sql
 CHECK (
   period_timing IS NULL
-  OR period_timing IN ('TIMELINE_TICK_START', 'TIMELINE_TICK_END', 'RENEWAL_START', 'RENEWAL_END')
+  OR period_timing IN ('TIMELINE_TICK_START', 'TIMELINE_TICK_END', 'RENEWAL_START', 'RENEWAL_END', 'BATTLE_END')
 )
 ```
 
@@ -1047,7 +1053,7 @@ CHECK (
 
 - Instant Effects execute immediately and do not create `active_effects` rows.
 - Finite and infinite Effects create runtime instances in `active_effects`.
-- A two-second, one-use Shield uses `duration_type = 'FINITE_TICKS'`, `duration_ticks = 20`, and `max_charges = 1`. It expires when its charge is consumed or its lifetime ends.
+- `BATTLE_END` Effects execute after all timeline Actions and before round-scoped Gain Effects are removed, unless the Battle ended immediately because HP reached 0.
 - Effect operations belong to `effect_components`; passive activation conditions belong to `action_triggers`.
 - `behavior_handler` must map to a whitelisted Java enum and registered Spring handler.
 - Gameplay logic should remain in the Spring Boot service layer, not in database triggers or stored procedures.
@@ -1152,6 +1158,7 @@ Quick Slash Level 2:
 | `action_level_id` | `uuid` | FK | No | Action level that triggers the Effect. References `action_levels.id`. |
 | `effect_definition_id` | `uuid` | FK | No | Effect triggered by the Action level. References `effect_definitions.id`. |
 | `activation_phase` | `varchar(30)` |  | No | Point in Action execution at which the Effect is applied. |
+| `period_interval_ticks` | `int` |  | Yes | Repeating cadence in 0.1-second ticks for a `RESOLVE_DURING_EXECUTION` mapping. |
 | `target_selector` | `varchar(20)` |  | No | Runtime target selected for this Effect application. |
 | `sequence_order` | `int` |  | No | Order in which the Effect is resolved when multiple Effects exist. |
 | `stop_on_failure` | `boolean` |  | No | Whether later mappings stop when this Effect cannot be applied. |
@@ -1183,6 +1190,10 @@ UNIQUE (action_level_id, sequence_order)
 ```sql
 CHECK (activation_phase IN ('RESOLVE_ON_START', 'RESOLVE_DURING_EXECUTION', 'RESOLVE_ON_END', 'ON_HIT', 'ON_PASSIVE_TRIGGER'))
 CHECK (target_selector IN ('SELF', 'OPPONENT', 'BOTH', 'ACTION_SOURCE', 'ACTION_TARGET'))
+CHECK (
+  period_interval_ticks IS NULL
+  OR (activation_phase = 'RESOLVE_DURING_EXECUTION' AND period_interval_ticks >= 1)
+)
 CHECK (sequence_order >= 0)
 ```
 
@@ -1211,6 +1222,7 @@ ON action_effects(effect_definition_id);
 - Target selection belongs to this mapping so the same reusable Effect can be applied to different targets.
 - Cost payment should be handled before resolving Effects.
 - `RESOLVE_ON_START` mappings resolve at `start_tick + 1`; `RESOLVE_DURING_EXECUTION` mappings apply for the complete `(start, end]` interval; and `RESOLVE_ON_END` mappings resolve at `end_tick`. Each of these mappings must use a resolution type declared by its Action.
+- `period_interval_ticks` is null for non-periodic mappings. For a periodic mapping, the first resolution is after one complete interval, later resolutions repeat at that cadence, and an endpoint-aligned resolution occurs at the Action's inclusive endpoint. The engine never resolves the mapping after the Action endpoint.
 - `stop_on_failure` defines deterministic failure behavior.
 - This table allows the same Effect definition to be reused across multiple Actions and levels.
 - This table supports data-driven Action design without hardcoding every Action’s behavior in server code.
@@ -1704,6 +1716,7 @@ The optional queue-check operation is advisory and does not write these rows. Co
 | `sequence_index` | `int` |  | No | Zero-based occurrence order in the Action Queue. |
 | `action_slot_id` | `uuid` | FK | Yes | Submitted Action slot. Set to null when runtime converts an invalid occurrence to `EMPTY_RUNTIME`. References `match_player_action_slots.id`. |
 | `entry_status` | `varchar(30)` |  | No | Submitted or runtime-empty state of this occurrence. |
+| `as_snapshot` | `numeric(10,2)` |  | Yes | Strictly positive AS captured when the occurrence reaches its runtime start position. Null before runtime scheduling. |
 | `scheduled_start_tick` | `int` |  | Yes | Computed start on the 0.1-second Battle timeline. Null before scheduling. |
 | `scheduled_end_tick` | `int` |  | Yes | Computed inclusive end on the 0.1-second Battle timeline. Null before scheduling. The interval is `(start, end]`. |
 | `runtime_failure_reason` | `varchar(50)` |  | Yes | Reason an occurrence became `EMPTY_RUNTIME`. |
@@ -1752,7 +1765,7 @@ CHECK (entry_status IN ('SUBMITTED', 'EMPTY_RUNTIME', 'EXECUTED'))
 CHECK (
   runtime_failure_reason IS NULL
   OR runtime_failure_reason IN (
-    'COUNTDOWN_INVALID',
+    'COOLDOWN_INVALID',
     'INSUFFICIENT_RESOURCE',
     'ACTION_NOT_OWNED',
     'ACTION_LOCKED',
@@ -1774,6 +1787,7 @@ CHECK (
 ```sql
 CHECK (scheduled_start_tick IS NULL OR scheduled_start_tick >= 0)
 CHECK (scheduled_end_tick IS NULL OR scheduled_end_tick >= 1)
+CHECK (as_snapshot IS NULL OR as_snapshot > 0)
 CHECK (
   (scheduled_start_tick IS NULL AND scheduled_end_tick IS NULL)
   OR
@@ -1806,13 +1820,13 @@ ON action_queue_entries(match_player_id, round_number);
 - Queue entries reference `match_player_action_slots`, not `actions` directly.
 - The same `action_slot_id` may appear multiple times in the same round.
 - Queue confirmation does not run validation and does not reject an invalid queue.
-- Before confirmation, the server may calculate an advisory result containing timing, cooldown, stack, transition, ownership, level, and activation-type violations without persisting or locking the queue. It never checks resource sufficiency.
+- Before confirmation, the server may calculate an advisory result containing timing, cooldown, stack, transition, ownership, level, and activation-type violations without persisting or locking the queue. Its duration values are estimates based on AS at the time of the check. It never checks resource sufficiency.
 - At runtime, the service layer checks ownership, Action level, activation type, cooldown, consecutive stack, costs, disabled state, and other execution requirements.
-- A runtime-invalid occurrence is changed to `EMPTY_RUNTIME`, its `action_slot_id` is cleared, and `runtime_failure_reason` records why. It pays no cost and produces no Action Effects.
+- A runtime-invalid occurrence is changed to `EMPTY_RUNTIME`, its `action_slot_id` is cleared, and `runtime_failure_reason` records why. It pays no cost and produces no Action Effects. `EMPTY_RUNTIME` is the database representation of the public `EMPTY_SLOT` runtime status.
 - Runtime conversion to `EMPTY_RUNTIME` must not stop the opponent's timeline.
-- `scheduled_start_tick` and `scheduled_end_tick` preserve deterministic `(start, end]` timing, including after an occurrence becomes `EMPTY_RUNTIME`, so later Actions do not shift. At queue confirmation, the server calculates each occurrence's effective duration as `max(1, ceil(base_duration_ticks / current_as))`; subsequent AS changes do not reschedule already-confirmed occurrences. AS does not modify cooldown. Basic Actions have no cooldown; Sect Techniques use their configured cooldown unchanged.
+- `scheduled_start_tick` and `scheduled_end_tick` preserve deterministic `(start, end]` timing, including after an occurrence becomes `EMPTY_RUNTIME`, so later Actions do not shift. At its runtime start position, the server captures `as_snapshot`, calculates the occurrence's effective duration, then reserves its interval before validation and cost checks. Later AS changes may affect later occurrences that have not started, but never reschedule an occurrence that has started. AS does not modify cooldown. Basic Actions have no cooldown; Sect Techniques use their configured cooldown unchanged.
 - The service layer does not enforce an Action Queue entry-count or timeline-duration limit.
-- After round 1, a valid sequence is derived from the previous confirmed sequence by removing zero or one contiguous range, retaining the relative order of all remaining occurrences, and inserting new occurrences anywhere. The removed range must satisfy `removed_duration_ticks * 3 <= previous_confirmed_queue_duration_ticks`; this previous duration is the prior queue's total duration, not a capacity. Advisory validation reports violations without blocking confirmation; at runtime, violating occurrences are converted to `EMPTY_RUNTIME` with `QUEUE_TRANSITION_INVALID`.
+- After round 1, a valid sequence is derived from the previous confirmed sequence by removing zero or one contiguous range, retaining the relative order of all remaining occurrences, and inserting new occurrences anywhere. The removed range must satisfy `removed_duration_ticks * 3 <= previous_resolved_queue_duration_ticks`; this previous duration is the prior round's authoritative duration, including reserved runtime-empty intervals, not a capacity. Advisory validation reports violations without blocking confirmation; at runtime, violating occurrences are converted to `EMPTY_RUNTIME` with `QUEUE_TRANSITION_INVALID`.
 
 ---
 
@@ -1830,7 +1844,6 @@ Examples:
 - Regeneration
 - Reserve Qi regeneration
 - Defense reduction
-- One-charge Shield
 ```
 
 Instant Effects do not need to be stored in this table. Effects with duration or ongoing behavior are stored here.
@@ -1922,7 +1935,7 @@ ON active_effects(effect_definition_id);
 - Effects with duration, delayed triggers, stacking, or repeated behavior should be stored here.
 - Stacking behavior is defined by `effect_definitions.stacking_policy`.
 - The service layer should enforce max stack rules using `effect_definitions.max_stacks`.
-- Charge-based Effects are removed when `remaining_charges` reaches 0. A Shield decrements its charge when it negates an incoming damage instance.
+- Charge-based Effects are removed when `remaining_charges` reaches 0.
 - Tick-based Effects use the shared 0.1-second timeline and remain active through their inclusive endpoint.
 - When an active Effect expires, the service layer may delete the row or keep it until match cleanup. The recommended behavior is to delete expired active Effects.
 
