@@ -48,9 +48,9 @@ The server captures a strictly positive `asSnapshot` when every Active Action be
 **Description:** The True Sword Sect represents disciplined mastery of conventional swordsmanship. Its intended style is balanced, sustainable, resilient, and adaptable.
 
 **Starting Stats:** 
->| 1000:heart: | 30:shield: | 150:crossed_swords: | 1:zap: |
+>| 4000:heart: | 30:shield: | 150:crossed_swords: | 1:zap: |
 
-**Support Stats:** +100:heart: +10:crossed_swords: +5:shield:
+**Support Stats:** +300:heart: +5:crossed_swords: +5:shield:
 
 **Techniques:**
 
@@ -59,7 +59,7 @@ The server captures a strictly positive `asSnapshot` when every Active Action be
 **Description:** The Flying Sword Sect emphasizes speed, deception, mobility, and extended combinations. Its intended style is swift, adaptive, and difficult to predict.
 
 **Starting Stats:** 
->| 900:heart: | 25:shield: | 180:crossed_swords: | 1.25:zap: |
+>| 3200:heart: | 25:shield: | 170:crossed_swords: | 1.25:zap: |
 
 **Support Stats:** +0.25:zap:
 
@@ -75,9 +75,9 @@ The server captures a strictly positive `asSnapshot` when every Active Action be
 **Description:** The Shadow Sword Sect emphasizes precision, misdirection, and calculated evasion. Its intended style is technical and rewards deliberate sequencing.
 
 **Starting Stats:** 
->| 900:heart: | 20:shield: | 200:crossed_swords: | 1.25:zap: |
+>| 3500:heart: | 20:shield: | 180:crossed_swords: | 1:zap: |
 
-**Support Stats:** +15:crossed_swords: +0.1:zap:
+**Support Stats:** +10:crossed_swords: +0.1:zap:
 
 **Techniques:**
 - Active: 
@@ -107,11 +107,11 @@ The server captures a strictly positive `asSnapshot` when every Active Action be
 
 **- Duration Type:** `FIXED` | **Duration:** 1s | **Cooldown:** 1s | **Stack:** 1
 
-**- Description:** Assume a guarded sword stance, **boost** 10/20/30 DEF while executing. On Completion, unleash an upward slash that **deal** (120/160/210% x STR) damage. If taken damage while in the stance, **deal** additional (50% x STR) damage.
+**- Description:** Assume a guarded sword stance, **boost** 20/30/50 DEF while executing. On Completion, unleash an upward slash that **deal** (120/160/210% x STR) damage. If taken damage while in the stance, **deal** additional (50% x STR) damage.
 
 **- Effect Logic:**
 
-`RESOLVE_DURING_EXECUTION`: **Boost** 10/20/30 DEF.
+`RESOLVE_DURING_EXECUTION`: **Boost** 20/30/50 DEF.
 
 `RESOLVE_ON_END`: **Deal** (120/160/210% x STR) damage. If damage was taken during this Action's effective execution interval, **deal** additional (50% x STR) damage.
 
@@ -210,7 +210,7 @@ While in Ascendance:
 
 **- Duration Type:** `FIXED` | **Duration:** 1.5s | **Cooldown:** 1.5s | **Stack:** 1
 
-**- Description:** Hide in **Shadow**, gain 1 **Shade**, and **boost** 10%/20%/30% STR. Then spring forth and unleash an assassination strike that **deals** (180%/210%/250% x STR) damage and, if the target is under **Shield** or **Defend**, **deals** additional (60%/70%/80% x STR) damage.
+**- Description:** Hide in **Shadow**, gain 1 **Shade**, and **boost** 10%/20%/30% STR. Then spring forth and unleash an assassination strike that **deals** (150/170%/200% x STR) damage and, if the target is under **Shield** or **Defend**, **deals** additional (60%/70%/80% x STR) damage.
 
 **- Effect Logic:**
 
@@ -218,7 +218,7 @@ While in Ascendance:
 
 `RESOLVE_DURING_EXECUTION`: Boost **Shadow**.
 
-`RESOLVE_ON_END`: **Deal** (180%/210%/250% x STR) damage. If the target is under **Shield** or **Defend**, **deal** additional (60%/70%/80% x STR) damage.
+`RESOLVE_ON_END`: **Deal** (150/170/200% x STR) damage. If the target is under **Shield** or **Defend**, **deal** additional (60%/70%/80% x STR) damage.
 
 ### 12. Phantasm - Huyễn (Shadow Sword Sect)
 **- Cost:** 50/70/100 | **Activation type:** Active

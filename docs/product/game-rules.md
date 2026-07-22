@@ -267,13 +267,13 @@ During Renewal, the server grants Round Qi for the new round:
 | Round | Round Qi granted |
 |---:|---:|
 | 1 | 150 |
-| 2 | 250 |
-| 3 | 300 |
-| 4 | 350 |
-| 5 | 400 |
-| 6 | 450 |
-| 7 | 500 |
-| 8+ | 550 |
+| 2 | 200 |
+| 3 | 250 |
+| 4 | 300 |
+| 5 | 350 |
+| 6 | 400 |
+| 7 | 450 |
+| 8+ | 500 |
 
 Effects may restore or generate Qi, and every Qi-changing Effect must explicitly target `ROUND_QI` or `RESERVE_QI`. A change is clamped to the target pool's global range; excess Qi is discarded and neither pool may become negative. Effects cannot modify a Qi maximum.
 
