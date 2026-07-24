@@ -1,1 +1,6 @@
-/** Defines typed STOMP command and event envelopes from the API/WebSocket contract. */
+/** Diagnostic event published by SwordVerse on the system-status topic. */
+export type SystemStatusEvent = {
+  application: string;
+  status: string;
+  serverTime: string;
+};

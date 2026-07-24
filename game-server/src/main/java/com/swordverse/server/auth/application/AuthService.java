@@ -5,6 +5,8 @@ import com.swordverse.server.auth.api.dto.RegisterRequestDto;
 import com.swordverse.server.auth.application.error.AuthError;
 import com.swordverse.server.auth.application.error.AuthException;
 import com.swordverse.server.auth.application.error.TokenReuseDetectedException;
+import com.swordverse.server.auth.application.event.AuthenticationSessionRevokedEvent;
+import com.swordverse.server.auth.application.event.SessionRevocationReason;
 import com.swordverse.server.auth.application.model.AuthSessionResult;
 import com.swordverse.server.auth.application.model.IssuedAccessToken;
 import com.swordverse.server.auth.application.model.TokenPair;
@@ -18,6 +20,7 @@ import jakarta.transaction.Transactional;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.UUID;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -31,6 +34,7 @@ public class AuthService {
     private final TokenService tokenService;
     private final AccessTokenService accessTokenService;
     private final RefreshTokenService refreshTokenService;
+    private final ApplicationEventPublisher eventPublisher;
 
     public AuthService(
             UserRepository userRepository,
@@ -39,7 +43,8 @@ public class AuthService {
             PasswordEncoder passwordEncoder,
             TokenService tokenService,
             AccessTokenService accessTokenService,
-            RefreshTokenService refreshTokenService) {
+            RefreshTokenService refreshTokenService,
+            ApplicationEventPublisher eventPublisher) {
         this.userRepository = userRepository;
         this.sessionRepository = sessionRepository;
         this.clock = clock;
@@ -47,6 +52,7 @@ public class AuthService {
         this.tokenService = tokenService;
         this.accessTokenService = accessTokenService;
         this.refreshTokenService = refreshTokenService;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional
@@ -160,7 +166,10 @@ public class AuthService {
         if (session.getStatus() == SessionStatus.ACTIVE) {
             session.revoke(now);
         }
+
         refreshTokenService.revokeAllActive(sessionId, now);
+
+        publishSessionRevoked(sessionId, SessionRevocationReason.LOGOUT, now);
     }
 
     @Transactional
@@ -206,10 +215,14 @@ public class AuthService {
     }
 
     private void revokeCompromisedSession(Session session, Instant now) {
+
         if (session.getStatus() == SessionStatus.ACTIVE) {
             session.revoke(now);
         }
+
         refreshTokenService.revokeAllActive(session.getId(), now);
+
+        publishSessionRevoked(session.getId(), SessionRevocationReason.REFRESH_TOKEN_REUSE, now);
     }
 
     private User findUser(UUID userId) {
@@ -229,5 +242,13 @@ public class AuthService {
     private static AuthException usernameAlreadyExists() {
         return new AuthException(
                 AuthError.USERNAME_ALREADY_EXISTS, "The username is already registered.");
+    }
+
+    /** Publishes credential-free revocation metadata for post-commit consumers such as realtime. */
+    private void publishSessionRevoked(
+            UUID sessionId, SessionRevocationReason reason, Instant occurredAt) {
+
+        eventPublisher.publishEvent(
+                new AuthenticationSessionRevokedEvent(sessionId, reason, occurredAt));
     }
 }
