@@ -48,10 +48,13 @@ activationType:
 - ACTIVE
 - PASSIVE
 
-resolutionType for Active Actions:
-- RESOLVE_ON_COMPLETION
-- ACTIVE_DURING_EXECUTION
+resolutionTypes for Active Actions: a non-empty array containing up to three distinct values:
+- RESOLVE_ON_START
+- RESOLVE_DURING_EXECUTION
+- RESOLVE_ON_END
 ```
+
+Each Action Effect is assigned to one of the Action's declared resolution types. `RESOLVE_ON_START` resolves at `startTick + 1`, `RESOLVE_DURING_EXECUTION` is active throughout `(startTick, endTick]`, and `RESOLVE_ON_END` resolves at `endTick`. Passive Actions use an empty `resolutionTypes` array.
 
 An Action may additionally have:
 
@@ -119,7 +122,7 @@ MAIN_3
 SUPPORT
 ```
 
-Both selected Basic Actions start at level 1. Other Actions use:
+At Round 1 start, both selected Basic Actions and all upgradeable Stats are level 1. Every selected Sect Technique, including Passive Techniques and Ultimates, is level 0 and remains locked until learned during an Ascension Phase beginning in Round 2. Action levels use:
 
 ```text
 currentLevel = 0  -> locked
@@ -132,47 +135,48 @@ Only unlocked Actions with `activationType = ACTIVE` are valid executable queue 
 
 An active Action slot may appear multiple times in the same queue. Passive Actions cannot be queued. They activate automatically when their configured gameplay-event conditions are satisfied.
 
-Queue duration limit:
+An Action Queue has no maximum number of occurrences and no maximum timeline duration. Each occurrence receives its effective duration at runtime, but the complete queue may use any number of ticks.
 
-| Round |  Duration | Ticks |
-| ----: | --------: | ----: |
-|     1 | 2 seconds |    20 |
-|     2 | 3 seconds |    30 |
-|     3 | 4 seconds |    40 |
-|     4 | 5 seconds |    50 |
-|     5 | 6 seconds |    60 |
-|    6+ | 7 seconds |    70 |
+One tick is `0.1` second. Actions occupy `(startTick, endTick]`. At an occurrence's runtime start position, the server snapshots strictly positive `currentAS` as `asSnapshot`, calculates duration from `durationType`, reserves the interval, then validates the occurrence and atomically checks costs. `AS_SCALED` uses `max(1, ceil(10 / asSnapshot))`; `FIXED` uses configured `durationTicks`; and `CONTROLLED` uses its documented server-side rule. Invalid occurrences become `EMPTY_SLOT` and retain the interval calculated from their Duration Type. Each player's queue is scheduled incrementally, so AS gained during Battle may affect later `AS_SCALED` and AS-dependent `CONTROLLED` occurrences that have not started, but never affects `FIXED` occurrences. AS does not modify cooldown values directly. `SLASH`, `DEFEND`, and `SHIELD` are Basic Actions with unlimited consecutive uses and no cooldown. Sect Techniques use their configured cooldown unchanged by AS.
 
-One tick is `0.1` second. Actions occupy `(startTick, endTick]`, and AS does not modify any Action's duration. Only Slash cooldown is divided by `AS` and rounded down to whole ticks. Defend, Shield, and every Sect Technique keep their configured cooldown.
+Before confirming, the client may request an advisory queue check. It reports cooldown, stack, transition, ownership, level, and activation-type violations. It never checks resource sufficiency and does not confirm, lock, or block the queue.
 
-Before confirming, the client may request an advisory queue check. It reports duration, cooldown, stack, transition, ownership, level, and activation-type violations. It never checks resource sufficiency and does not confirm, lock, or block the queue.
-
-After round 1, at most one retained queue occurrence may be removed. Retained occurrences keep their relative order; newly selected Actions may be inserted anywhere.
+After round 1, the player may remove zero or one contiguous range of occurrences from the previous confirmed queue. The removed duration must satisfy `removedDurationTicks * 3 <= previousResolvedQueueDurationTicks`; retained occurrences keep their relative order, and newly selected Actions may be inserted anywhere. `previousResolvedQueueDurationTicks` is the prior round's authoritative resolved duration, including reserved `EMPTY_SLOT` intervals, not a Queue limit.
 
 ### 3.3 Runtime resources
 
-HP, MP, and QP have current and maximum values:
+HP has current and maximum values. Qi is global runtime state, not a character Stat; Sects do not grant it and Ascension cannot upgrade it.
 
 ```text
-0 <= current <= max
+0 <= roundQi <= 550
+0 <= reserveQi <= 150
+availableQi = roundQi + reserveQi
 ```
 
-Healing and restoration cannot exceed the current maximum. Effects may modify maximum values during a match.
+`availableQi` is derived and read-only; it is not independently persisted. Action costs use `QI` and may use both pools. Before paying a QI cost, the server verifies `roundQi + reserveQi >= requiredQi`, deducts from `roundQi` first, then deducts any remainder from `reserveQi`. All Action costs are atomic: insufficient combined Qi deducts neither Qi nor any other cost and produces `INSUFFICIENT_RESOURCE` with the existing `EMPTY_SLOT` behavior.
+
+Effects may restore or generate Qi, and every Qi-changing Effect must explicitly target `ROUND_QI` or `RESERVE_QI`. The server clamps the affected pool to `0..550` or `0..150` respectively; excess Qi is discarded and neither pool may become negative. Effects cannot modify a Qi maximum.
 
 During Renewal, the server:
 
 1. Resolves Effects scheduled for `RENEWAL_START`.
-2. Converts remaining MP to QP using the Main Sect ratio without exceeding `qp.max`.
-3. Restores MP to `mp.max`.
+2. Transfers remaining Round Qi into Reserve Qi using `transferableQi = min(roundQi, 150 - reserveQi)`, then sets `reserveQi = reserveQi + transferableQi`, `discardedQi = roundQi - transferableQi`, and `roundQi = 0`.
+3. Grants Round Qi for the new round: 150 in round 1, 250 in round 2, 300 in round 3, 350 in round 4, 400 in round 5, 450 in round 6, 500 in round 7, and 550 from round 8 onward.
 4. Resolves Effects scheduled for `RENEWAL_END`.
+5. Clamps `roundQi` and `reserveQi` to their valid ranges.
+6. Removes expired Effects according to the existing Effect lifecycle.
+
+`RENEWAL_START` Effects may change Qi before the transfer, while `RENEWAL_END` Effects observe newly granted Round Qi. Untransferable Round Qi is discarded when Reserve Qi is full.
 
 ### 3.4 Battle
 
 Both Action Queues resolve simultaneously on the same 0.1-second timeline. Actions within one player's queue are sequential, but the two players' Action boundaries may differ. There is no initiative or alternating turn order.
 
-Every occurrence is checked against actual runtime state. If it is invalid, cannot pay its cost, or is disabled, it becomes `EMPTY_SLOT`, produces no Effects, and keeps its scheduled interval so later Actions do not shift. The opposing timeline continues.
+Every occurrence is checked against actual runtime state after its AS snapshot and interval are calculated. If it is invalid, cannot pay its cost, or is disabled, it becomes `EMPTY_SLOT`, produces no Effects, and keeps its scheduled interval so later Actions do not shift. The opposing timeline continues. In persistence, `EMPTY_RUNTIME` represents this public `EMPTY_SLOT` runtime status.
 
 Passive Actions may trigger from gameplay events produced during resolution. Passive results are included in timeline resolution events; Passive Actions are never valid executable queue entries.
+
+Defend creates one execution-bound blocking charge for its effective interval. It consumes the charge only when it ignores the next qualifying Slash damage instance; non-Slash damage, or an instance already ignored by a higher-priority Effect, does not consume it. The charge expires at the interval endpoint if unused, while the Defend occurrence continues until that endpoint even when the charge is consumed.
 
 ---
 
@@ -320,19 +324,14 @@ Response `200 OK`:
         "str": 8,
         "hp": 100,
         "def": 4,
-        "as": 5,
-        "mp": 30,
-        "qp": 10
+        "as": 5
       },
       "supportBonusStats": {
         "str": 2,
         "hp": 10,
         "def": 1,
-        "as": 0,
-        "mp": 5,
-        "qp": 0
-      },
-      "mpToQpRatio": 2.0
+        "as": 0
+      }
     }
   ],
   "total": 1
@@ -359,19 +358,14 @@ Response `200 OK`:
     "str": 8,
     "hp": 100,
     "def": 4,
-    "as": 5,
-    "mp": 30,
-    "qp": 10
+    "as": 5
   },
   "supportBonusStats": {
     "str": 2,
     "hp": 10,
     "def": 1,
-    "as": 0,
-    "mp": 5,
-    "qp": 0
+    "as": 0
   },
-  "mpToQpRatio": 2.0,
   "actions": [
     {
       "actionId": "22172357-3371-4aa7-8641-d44b9405db98",
@@ -380,7 +374,7 @@ Response `200 OK`:
       "description": "A fast sword strike.",
       "actionSource": "SECT_TECHNIQUE",
       "activationType": "ACTIVE",
-      "resolutionType": "RESOLVE_ON_COMPLETION",
+      "resolutionTypes": ["RESOLVE_ON_END"],
       "isUltimate": false,
       "maxLevel": 3
     },
@@ -391,7 +385,7 @@ Response `200 OK`:
       "description": "The Ultimate Action of Heaven Sword.",
       "actionSource": "SECT_TECHNIQUE",
       "activationType": "ACTIVE",
-      "resolutionType": "RESOLVE_ON_COMPLETION",
+      "resolutionTypes": ["RESOLVE_ON_END"],
       "isUltimate": true,
       "maxLevel": 3
     }
@@ -422,7 +416,7 @@ Response `200 OK`:
       "description": "Triggers after three successful hits.",
       "actionSource": "SECT_TECHNIQUE",
       "activationType": "PASSIVE",
-      "resolutionType": null,
+      "resolutionTypes": [],
       "isUltimate": false,
       "maxLevel": 3,
       "sectIds": ["fdb55783-b0d7-4f74-9ac6-6fb587783ac8"]
@@ -451,19 +445,20 @@ Response `200 OK`:
   "description": "A fast sword strike.",
   "actionSource": "SECT_TECHNIQUE",
   "activationType": "ACTIVE",
-  "resolutionType": "RESOLVE_ON_COMPLETION",
+  "resolutionTypes": ["RESOLVE_ON_END"],
   "isUltimate": false,
   "sectIds": ["fdb55783-b0d7-4f74-9ac6-6fb587783ac8"],
   "levels": [
     {
       "level": 1,
       "learningPointCost": 1,
-      "baseDurationTicks": 10,
+      "durationType": "FIXED",
+      "durationTicks": 10,
       "baseCooldownTicks": 5,
       "maxConsecutiveStacks": 1,
       "costs": [
         {
-          "resourceType": "MP",
+          "resourceType": "QI",
           "paymentTiming": "ON_EXECUTION_START",
           "calculationType": "FLAT",
           "value": 8
@@ -583,8 +578,7 @@ Response `200 OK`:
         "def": 5,
         "as": 5,
         "hp": { "current": 92, "max": 110 },
-        "mp": { "current": 30, "max": 35 },
-        "qp": { "current": 6, "max": 10 }
+        "qi": { "roundQi": 250, "reserveQi": 50, "roundMax": 550, "reserveMax": 150, "available": 300 }
       },
       "actionSlots": [
         {
@@ -669,8 +663,7 @@ Response `200 OK`:
       "playerId": "5ab5cf4a-dc55-4130-b8e2-5b7751b091e0",
       "state": {
         "hp": { "current": 18, "max": 110 },
-        "mp": { "current": 22, "max": 35 },
-        "qp": { "current": 9, "max": 10 }
+        "qi": { "roundQi": 0, "reserveQi": 70, "roundMax": 550, "reserveMax": 150, "available": 70 }
       }
     }
   ]
@@ -1052,8 +1045,7 @@ After both confirm, `SUPPORT_LOADOUT_RESOLVED` includes both complete six-slot l
           "def": 5,
           "as": 5,
           "hp": { "current": 110, "max": 110 },
-          "mp": { "current": 35, "max": 35 },
-          "qp": { "current": 0, "max": 10 }
+          "qi": { "roundQi": 0, "reserveQi": 0, "roundMax": 550, "reserveMax": 150, "available": 0 }
         }
       }
     ]
@@ -1073,7 +1065,8 @@ stateDiagram-v2
   PRE_MATCH_BASIC_SELECTION --> PRE_MATCH_MAIN_SECT_SELECTION
   PRE_MATCH_MAIN_SECT_SELECTION --> PRE_MATCH_SUPPORT_SELECTION
   PRE_MATCH_SUPPORT_SELECTION --> RENEWAL
-  RENEWAL --> ASCENSION
+  RENEWAL --> ACTION_STRATEGY: round 1
+  RENEWAL --> ASCENSION: round 2+
   ASCENSION --> ACTION_STRATEGY
   ACTION_STRATEGY --> BATTLE
   BATTLE --> RENEWAL
@@ -1119,12 +1112,25 @@ Every phase event contains:
         ]
       }
     ],
-    "players": []
+    "players": [
+      {
+        "playerId": "5ab5cf4a-dc55-4130-b8e2-5b7751b091e0",
+        "qi": { "roundQi": 250, "reserveQi": 150, "roundMax": 550, "reserveMax": 150, "available": 400 },
+        "renewalQi": {
+          "roundQiTransferred": 40,
+          "discardedRoundQi": 10,
+          "roundQiGranted": 250,
+          "effectChanges": [
+            { "target": "ROUND_QI", "before": 40, "change": 10, "after": 50 }
+          ]
+        }
+      }
+    ]
   }
 }
 ```
 
-The server then emits `ASCENSION_STARTED` with `learningPoints: 2`.
+`roundQiTransferred` is the amount moved into Reserve Qi before the new-round grant, and `discardedRoundQi` is the amount that did not fit. `effectChanges` includes Qi changes caused by Renewal Effects. The final `qi` object is authoritative and is emitted after the Renewal order defined in section 3.3. In Round 1, the server emits `ACTION_STRATEGY_STARTED` directly. From Round 2 onward, it emits `ASCENSION_STARTED` with `learningPoints: 2`.
 
 ### 11.2 Confirm Ascension
 
@@ -1155,9 +1161,12 @@ Payload:
 
 Rules:
 
+- This command is valid only in Round 2 or later, when the match is in `ASCENSION`.
 - Total allocation is between 0 and 2 LP.
 - Stat targets are limited to `HP`, `STR`, `DEF`, and `AS`.
 - Stats and Actions have a maximum level of 3.
+- Each `STAT` upgrade permanently increases the selected unmodified integer Stat value by 10%. The increase is cumulative, calculated before temporary Effect modifiers, and rounded up: `increase = ceil(statValue * 0.10)`.
+- For `HP`, calculate the rounded-up 10% increase from the previous maximum, add it to `hp.max`, and heal `hp.current` by that same amount without exceeding the new maximum.
 - Level `0 -> 1` learns the Action.
 - Level `1+` upgrades the Action.
 - Unspent LP is forfeited.
@@ -1195,8 +1204,9 @@ Private response:
   "matchId": "8262bd3a-8ad5-41f8-b6af-918737abe778",
   "payload": {
     "valid": false,
-    "durationLimitTicks": 30,
     "totalDurationTicks": 34,
+    "previousResolvedQueueDurationTicks": 30,
+    "removedDurationTicks": 12,
     "occurrences": [
       {
         "sequenceIndex": 0,
@@ -1209,24 +1219,18 @@ Private response:
     ],
     "violations": [
       {
-        "code": "DURATION_LIMIT_EXCEEDED",
-        "sequenceIndex": 2,
-        "details": { "durationLimitTicks": 30, "endTick": 34 }
+        "code": "QUEUE_TRANSITION_INVALID",
+        "sequenceIndex": null,
+        "details": { "previousResolvedQueueDurationTicks": 30, "removedDurationTicks": 12 }
       }
     ]
   }
 }
 ```
 
-The check is advisory. It does not persist, confirm, lock, reject, or alter the queue. It reports every detectable non-resource violation, including `DURATION_LIMIT_EXCEEDED`, `COUNTDOWN_INVALID`, `ACTION_NOT_OWNED`, `ACTION_LOCKED`, `ACTION_NOT_QUEUEABLE`, and `QUEUE_TRANSITION_INVALID`. It never checks MP, QP, HP, or any other Action cost.
+The check is advisory. It does not persist, confirm, lock, reject, or alter the queue. It reports every detectable non-resource violation, including `COOLDOWN_INVALID`, `ACTION_NOT_OWNED`, `ACTION_LOCKED`, `ACTION_NOT_QUEUEABLE`, and `QUEUE_TRANSITION_INVALID`. It never checks QI, HP, or any other Action cost. It estimates `AS_SCALED` with AS at preview time, uses configured `durationTicks` for `FIXED`, and evaluates the available-state rule for `CONTROLLED`. `totalDurationTicks`, occurrence boundaries, and `effectiveDurationTicks` are estimates; runtime Battle events are authoritative.
 
-AS does not modify Action duration. Only Slash uses AS-adjusted cooldown:
-
-```text
-effectiveCooldownTicks = max(0, floor(baseCooldownTicks / AS))
-```
-
-Defend, Shield, and Sect Technique cooldowns use `baseCooldownTicks` unchanged. Every Action duration uses `baseDurationTicks` unchanged.
+AS affects `AS_SCALED` and AS-dependent `CONTROLLED` durations through the runtime `asSnapshot` rule. `SLASH`, `DEFEND`, and `SHIELD` have no cooldown. Sect Techniques use `baseCooldownTicks` unchanged by AS, though a shorter Action can cause its cooldown window to begin earlier.
 
 ### 11.4 Confirm Action Queue
 
@@ -1251,7 +1255,7 @@ Payload:
 Rules:
 
 - The server stores the submitted sequence without running queue validation.
-- Invalid ownership, level, activation type, duration, cooldown, stack, transition, or resource state does not block confirmation.
+- Invalid ownership, level, activation type, cooldown, stack, transition, or resource state does not block confirmation.
 - The same slot may appear multiple times.
 - Submitting confirms the queue and prevents further edits.
 - At timeout, an unconfirmed player receives an empty queue.
@@ -1281,16 +1285,18 @@ Errors are limited to command-level failures such as `INVALID_MATCH_PHASE`, `MAL
     "actionSlotId": "863cda43-a4bf-4fd9-858a-715cc46fe982",
     "actionId": "737cb9aa-f0c8-4180-a9c8-a94fe9e0de7d",
     "actionKey": "SLASH",
-    "resolutionType": "RESOLVE_ON_COMPLETION",
+    "durationType": "AS_SCALED",
+    "resolutionTypes": ["RESOLVE_ON_END"],
+    "asSnapshot": 1.25,
     "startTick": 0,
-    "endTick": 10,
-    "effectiveDurationTicks": 10,
-    "effectiveCooldownTicks": 1
+    "endTick": 8,
+    "effectiveDurationTicks": 8,
+    "effectiveCooldownTicks": 0
   }
 }
 ```
 
-Action duration is never AS-adjusted. For Slash, `effectiveCooldownTicks` includes AS adjustment; other Actions use their configured cooldown unchanged. `ACTIVE_DURING_EXECUTION` Effects remain active for the complete `(startTick, endTick]` interval.
+`ACTION_STARTED` is the public representation of the internal authoritative `ACTION_STARTED` gameplay event. It reveals `durationType`, `asSnapshot`, `startTick`, `endTick`, and authoritative `effectiveDurationTicks`, but never exposes executable formulas, internal handlers, arbitrary server configuration, or hidden Passive trigger configuration. In the example, `ceil(10 / 1.25) = 8`. Basic Actions have no cooldown; Sect Technique cooldowns use their configured values unchanged by AS. `RESOLVE_ON_START` Effects resolve at `startTick + 1`, `RESOLVE_DURING_EXECUTION` Effects remain active for the complete `(startTick, endTick]` interval, and `RESOLVE_ON_END` Effects resolve at `endTick`.
 
 ### 12.2 Timeline point resolved
 
@@ -1332,8 +1338,7 @@ Action duration is never AS-adjusted. For Slash, `effectiveCooldownTicks` includ
 Runtime-invalid occurrences use `status = EMPTY_SLOT` and one of these `failureReason` values:
 
 ```text
-DURATION_LIMIT_EXCEEDED
-COUNTDOWN_INVALID
+COOLDOWN_INVALID
 INSUFFICIENT_RESOURCE
 ACTION_NOT_OWNED
 ACTION_LOCKED
@@ -1346,7 +1351,9 @@ An empty occurrence retains its scheduled interval, pays no cost, and produces n
 
 ### 12.3 Round and match completion
 
-If no terminal condition exists after both timelines complete, the server emits `ROUND_ENDED` and starts the next Renewal.
+If no terminal condition exists after both timelines complete, the server resolves internal `BATTLE_END` Effects in the product-defined deterministic order, includes their resulting state changes in the relevant server events, then emits `ROUND_ENDED` and starts the next Renewal. `BATTLE_END` is not a public trigger-configuration payload.
+
+If HP reaches 0 during Battle, the immediate match-end policy prevents remaining timeline Actions and `BATTLE_END` Effects from resolving.
 
 Match result reasons:
 
@@ -1448,8 +1455,7 @@ Surrender is valid in every match phase except `GAME_OVER`. It immediately creat
 | `INVALID_ASCENSION_TARGET`        | Ascension target is invalid or ineligible.                                                                       |
 | `ACTION_LEVEL_MAX`                | Action cannot be upgraded further.                                                                               |
 | `STAT_LEVEL_MAX`                  | Upgradeable Stat is already level 3.                                                                             |
-| `DURATION_LIMIT_EXCEEDED`         | Advisory/runtime result: an occurrence extends beyond the round duration limit.                                  |
-| `COUNTDOWN_INVALID`               | Advisory/runtime result: cooldown or consecutive-stack timing is invalid.                                        |
+| `COOLDOWN_INVALID`                | Advisory/runtime result: cooldown or consecutive-stack timing is invalid.                                        |
 | `INSUFFICIENT_RESOURCE`           | Runtime result: actual resources cannot pay the Action cost. This is never returned by queue preview validation. |
 | `ACTION_NOT_OWNED`                | Advisory/runtime result: Action slot does not belong to the caller.                                              |
 | `ACTION_LOCKED`                   | Advisory/runtime result: Action has level 0.                                                                     |
@@ -1481,9 +1487,14 @@ Private STOMP rejection:
 ```ts
 export type ActionSource = "BASIC" | "SECT_TECHNIQUE";
 export type ActivationType = "ACTIVE" | "PASSIVE";
+export type ActionDurationType =
+  | "AS_SCALED"
+  | "FIXED"
+  | "CONTROLLED";
 export type ResolutionType =
-  | "RESOLVE_ON_COMPLETION"
-  | "ACTIVE_DURING_EXECUTION";
+  | "RESOLVE_ON_START"
+  | "RESOLVE_DURING_EXECUTION"
+  | "RESOLVE_ON_END";
 export type ActionSlotType =
   | "BASIC_1"
   | "BASIC_2"
@@ -1514,14 +1525,21 @@ export interface CappedValue {
   max: number;
 }
 
+export interface QiState {
+  roundQi: number;
+  reserveQi: number;
+  roundMax: 550;
+  reserveMax: 150;
+  available: number;
+}
+
 export interface PlayerState {
   statLevels: { str: number; hp: number; def: number; as: number };
   str: number;
   def: number;
   as: number;
   hp: CappedValue;
-  mp: CappedValue;
-  qp: CappedValue;
+  qi: QiState;
 }
 
 export interface ActionSummary {
@@ -1531,7 +1549,7 @@ export interface ActionSummary {
   description: string | null;
   actionSource: ActionSource;
   activationType: ActivationType;
-  resolutionType: ResolutionType | null;
+  resolutionTypes: ResolutionType[];
   isUltimate: boolean;
   maxLevel: number;
 }
@@ -1539,7 +1557,8 @@ export interface ActionSummary {
 export interface ActionLevelDefinition {
   level: 1 | 2 | 3;
   learningPointCost: number;
-  baseDurationTicks: number | null;
+  durationType: ActionDurationType | null;
+  durationTicks: number | null;
   baseCooldownTicks: number | null;
   maxConsecutiveStacks: number | null;
 }
@@ -1574,8 +1593,7 @@ export interface ConfirmActionQueuePayload {
 export type CheckActionQueuePayload = ConfirmActionQueuePayload;
 
 export type QueueViolationCode =
-  | "DURATION_LIMIT_EXCEEDED"
-  | "COUNTDOWN_INVALID"
+  | "COOLDOWN_INVALID"
   | "ACTION_NOT_OWNED"
   | "ACTION_LOCKED"
   | "ACTION_NOT_QUEUEABLE"
@@ -1589,8 +1607,9 @@ export interface QueueViolation {
 
 export interface ActionQueueCheckResult {
   valid: boolean;
-  durationLimitTicks: number;
   totalDurationTicks: number;
+  previousResolvedQueueDurationTicks: number | null;
+  removedDurationTicks: number;
   violations: QueueViolation[];
 }
 
@@ -1617,6 +1636,8 @@ export interface ServerEvent<TPayload> {
 ## 16. Spring Boot DTO Reference
 
 ```java
+import java.math.BigDecimal;
+
 public enum ActionSource {
     BASIC, SECT_TECHNIQUE
 }
@@ -1625,8 +1646,14 @@ public enum ActivationType {
     ACTIVE, PASSIVE
 }
 
+public enum ActionDurationType {
+    AS_SCALED,
+    FIXED,
+    CONTROLLED
+}
+
 public enum ResolutionType {
-    RESOLVE_ON_COMPLETION, ACTIVE_DURING_EXECUTION
+    RESOLVE_ON_START, RESOLVE_DURING_EXECUTION, RESOLVE_ON_END
 }
 
 public enum ActionSlotType {
@@ -1636,6 +1663,23 @@ public enum ActionSlotType {
 public enum GameplayActivityType {
     MATCHMAKING, ROOM, MATCH
 }
+
+public record QiState(
+    int roundQi,
+    int reserveQi,
+    int roundMax,
+    int reserveMax,
+    int available
+) {}
+
+public record PlayerState(
+    Map<String, Integer> statLevels,
+    int str,
+    int def,
+    BigDecimal as,
+    CappedValue hp,
+    QiState qi
+) {}
 
 public record ClaimGameplayPayload(
     GameplayActivityType activityType,
@@ -1665,8 +1709,7 @@ public record CheckActionQueuePayload(
 ) {}
 
 public enum QueueViolationCode {
-    DURATION_LIMIT_EXCEEDED,
-    COUNTDOWN_INVALID,
+    COOLDOWN_INVALID,
     ACTION_NOT_OWNED,
     ACTION_LOCKED,
     ACTION_NOT_QUEUEABLE,
@@ -1681,8 +1724,9 @@ public record QueueViolation(
 
 public record ActionQueueCheckResult(
     boolean valid,
-    int durationLimitTicks,
     int totalDurationTicks,
+    Integer previousResolvedQueueDurationTicks,
+    int removedDurationTicks,
     List<QueueViolation> violations
 ) {}
 

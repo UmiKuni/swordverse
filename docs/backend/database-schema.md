@@ -86,7 +86,7 @@ Each player selects:
 - One Support Action from the Support Sect
 ```
 
-The Main Sect provides the player’s base stats and MP-to-QP conversion ratio. The Support Sect provides additional stat bonuses and a selected Support Action.
+The Main Sect provides the player’s base stats. The Support Sect provides additional stat bonuses and a selected Support Action. Qi generation and Qi limits are global runtime rules and are not granted by either Sect.
 
 ---
 
@@ -125,7 +125,7 @@ current_level = 0  -> locked
 current_level >= 1 -> unlocked
 ```
 
-Selected Basic Actions start at level 1. Actions and upgradeable Stats have a maximum level of 3. Ascension may upgrade Actions and only the `HP`, `STR`, `DEF`, and `AS` Stats.
+In Round 1, selected Basic Actions and the upgradeable Stats start at level 1, while every selected Sect Technique starts at level 0. Actions and upgradeable Stats have a maximum level of 3. Ascension may upgrade Actions and only the `HP`, `STR`, `DEF`, and `AS` Stats. Each Stat upgrade permanently increases the unmodified player Stat by 10%; upgrades are cumulative and temporary Effect modifiers are applied separately. `HP`, `STR`, and `DEF` increases are rounded up to an integer; `AS` increases are rounded up to two decimal places.
 
 ---
 
@@ -475,7 +475,6 @@ A Sect provides:
 - Main Sect base stats
 - Support Sect bonus stats
 - Available Actions
-- MP-to-QP conversion ratio
 - Display information for the UI
 ```
 
@@ -493,16 +492,11 @@ The term `Sect` replaces the previous term `Order`.
 | `main_base_str` | `int` |  | No | STR value granted when this Sect is selected as the Main Sect. |
 | `main_base_hp` | `int` |  | No | HP max value granted when this Sect is selected as the Main Sect. |
 | `main_base_def` | `int` |  | No | DEF value granted when this Sect is selected as the Main Sect. |
-| `main_base_as` | `int` |  | No | AS value granted when this Sect is selected as the Main Sect. |
-| `main_base_mp` | `int` |  | No | MP max value granted when this Sect is selected as the Main Sect. |
-| `main_base_qp` | `int` |  | No | QP max value granted when this Sect is selected as the Main Sect. |
+| `main_base_as` | `numeric(10,2)` |  | No | AS value granted when this Sect is selected as the Main Sect. |
 | `support_bonus_str` | `int` |  | No | STR bonus granted when this Sect is selected as the Support Sect. |
 | `support_bonus_hp` | `int` |  | No | HP max bonus granted when this Sect is selected as the Support Sect. |
 | `support_bonus_def` | `int` |  | No | DEF bonus granted when this Sect is selected as the Support Sect. |
-| `support_bonus_as` | `int` |  | No | AS bonus granted when this Sect is selected as the Support Sect. |
-| `support_bonus_mp` | `int` |  | No | MP max bonus granted when this Sect is selected as the Support Sect. |
-| `support_bonus_qp` | `int` |  | No | QP max bonus granted when this Sect is selected as the Support Sect. |
-| `mp_to_qp_ratio` | `numeric(10,2)` |  | No | MP-to-QP conversion ratio used during Renewal when this Sect is selected as the Main Sect. |
+| `support_bonus_as` | `numeric(10,2)` |  | No | AS bonus granted when this Sect is selected as the Support Sect. |
 | `created_at` | `timestamptz` |  | No | Timestamp when the Sect record was created. |
 | `updated_at` | `timestamptz` |  | No | Timestamp when the Sect record was last updated. |
 
@@ -523,8 +517,6 @@ CHECK (main_base_str >= 0)
 CHECK (main_base_hp >= 0)
 CHECK (main_base_def >= 0)
 CHECK (main_base_as >= 0)
-CHECK (main_base_mp >= 0)
-CHECK (main_base_qp >= 0)
 ```
 
 ```sql
@@ -532,12 +524,6 @@ CHECK (support_bonus_str >= 0)
 CHECK (support_bonus_hp >= 0)
 CHECK (support_bonus_def >= 0)
 CHECK (support_bonus_as >= 0)
-CHECK (support_bonus_mp >= 0)
-CHECK (support_bonus_qp >= 0)
-```
-
-```sql
-CHECK (mp_to_qp_ratio >= 0)
 ```
 
 #### Relationships
@@ -554,7 +540,7 @@ CHECK (mp_to_qp_ratio >= 0)
 - The database stores `sect_type` as a readable string instead of a PostgreSQL enum to keep future content updates easier.
 - Main Sect stats define the player’s starting combat identity.
 - Support Sect stats are added as bonuses when selected as the Support Sect.
-- `mp_to_qp_ratio` is determined only by the Main Sect.
+- Qi generation and global Qi limits are not Sect data.
 - Runtime stat changes during a match are stored in `match_players`, not in this table.
 
 ---
@@ -587,7 +573,7 @@ The game uses one unified `actions` table instead of separate `basic_actions` an
 | `action_key` | `varchar(100)` | Unique | No | Stable application identifier, such as `HEAVENLY_EXECUTION`. |
 | `action_source` | `varchar(20)` |  | No | Source category of the card. |
 | `activation_type` | `varchar(20)` |  | No | Defines whether the card is actively queued or passively triggered. |
-| `resolution_type` | `varchar(40)` |  | Yes | Active Action timing model: resolve at completion or remain active during execution. Null for Passive Actions. |
+| `resolution_types` | `varchar(40)[]` |  | Yes | One to three distinct timing types for an Active Action. Null for Passive Actions. |
 | `is_ultimate` | `boolean` |  | No | Indicates whether this Sect card is an Ultimate Action. |
 | `name` | `varchar(100)` |  | No | Display name of the Action. |
 | `description` | `text` |  | Yes | Description shown to the player. |
@@ -617,14 +603,23 @@ CHECK (activation_type IN ('ACTIVE', 'PASSIVE'))
 
 ```sql
 CHECK (
-  (activation_type = 'ACTIVE' AND resolution_type IN ('RESOLVE_ON_COMPLETION', 'ACTIVE_DURING_EXECUTION'))
+  (
+    activation_type = 'ACTIVE'
+    AND resolution_types IS NOT NULL
+    AND cardinality(resolution_types) BETWEEN 1 AND 3
+    AND resolution_types <@ ARRAY['RESOLVE_ON_START', 'RESOLVE_DURING_EXECUTION', 'RESOLVE_ON_END']::varchar[]
+  )
   OR
-  (activation_type = 'PASSIVE' AND resolution_type IS NULL)
+  (activation_type = 'PASSIVE' AND resolution_types IS NULL)
 )
 ```
 
 ```sql
 CHECK (is_ultimate = false OR action_source = 'SECT_TECHNIQUE')
+```
+
+```sql
+CHECK (is_ultimate = false OR activation_type = 'ACTIVE')
 ```
 
 #### Relationships
@@ -637,11 +632,12 @@ CHECK (is_ultimate = false OR action_source = 'SECT_TECHNIQUE')
 
 #### Notes
 
-- `action_source`, `activation_type`, and `resolution_type` are separate classifications. An Ultimate may be active or passive.
+- `action_source`, `activation_type`, and `resolution_types` are separate classifications. An Ultimate is always `ACTIVE`.
+- An Active Action has one to three distinct resolution types. The service layer rejects duplicate values and ensures every Action Effect mapping uses a type declared by its Action.
 - Only `ACTIVE` Actions may be added to the Action Queue.
 - `PASSIVE` Actions are evaluated from gameplay events and cannot be queued.
 - The three Basic Action records use stable keys `SLASH`, `DEFEND`, and `SHIELD`. They are not connected to Sects.
-- Slash normally uses `RESOLVE_ON_COMPLETION`; Defend normally uses `ACTIVE_DURING_EXECUTION`; Shield may resolve on completion and create a finite, charge-based Shield Effect.
+- `RESOLVE_ON_START` resolves at `start_tick + 1`; `RESOLVE_DURING_EXECUTION` remains active throughout `(start_tick, end_tick]`; and `RESOLVE_ON_END` resolves at `end_tick`.
 - `action_key` is stable across environments and maps cleanly to Java constants, logs, fixtures, and frontend assets.
 - `behavior_handler` must map to a Java enum and registered Spring handler. A database value must never contain a Java class name or executable script.
 - Standard Actions should use data-driven triggers and Effect components. `behavior_handler` is reserved for exceptional mechanics.
@@ -732,7 +728,7 @@ Runtime rule:
 ```text
 current_level = 0 means locked.
 current_level >= 1 means unlocked.
-Basic Actions start at level 1.
+In Round 1, selected Basic Actions are level 1 and every selected Sect Technique is level 0.
 ```
 
 The `action_levels` table only stores actual configured levels, usually level 1 and above. Level 0 does not need a row.
@@ -745,9 +741,11 @@ The `action_levels` table only stores actual configured levels, usually level 1 
 | `action_id` | `uuid` | FK | No | Action this level belongs to. References `actions.id`. |
 | `level` | `int` |  | No | Level number of the Action, from 1 through 3. |
 | `learning_point_cost` | `int` |  | No | LP cost required to learn or upgrade to this level. |
-| `base_duration_ticks` | `int` |  | Yes | Base execution duration in 0.1-second ticks. Required for Active Actions and null for Passive Actions. |
-| `cooldown_ticks` | `int` |  | Yes | Configured base cooldown after the Action's consecutive stack chain, in 0.1-second ticks. Required for Active Actions. |
-| `max_consecutive_stacks` | `int` |  | Yes | Maximum immediately consecutive uses before cooldown applies. Required for Active Actions. |
+| `duration_type` | `varchar(20)` |  | Yes | `AS_SCALED`, `FIXED`, or `CONTROLLED` for an Active Action. Null for Passive Actions. |
+| `duration_ticks` | `int` |  | Yes | Configured duration in 0.1-second ticks for a `FIXED` Action. Null otherwise. |
+| `duration_config` | `jsonb` |  | Yes | Typed, validated configuration for a `CONTROLLED` Action. Null otherwise. |
+| `cooldown_ticks` | `int` |  | Yes | Configured base cooldown after the Action's consecutive stack chain, in 0.1-second ticks. Basic Actions use `0`. |
+| `max_consecutive_stacks` | `int` |  | Yes | Maximum immediately consecutive uses before cooldown applies. Null means unlimited for a Basic Action. |
 | `created_at` | `timestamptz` |  | No | Timestamp when the Action level record was created. |
 | `updated_at` | `timestamptz` |  | No | Timestamp when the Action level record was last updated. |
 
@@ -775,7 +773,9 @@ CHECK (level BETWEEN 1 AND 3)
 
 ```sql
 CHECK (learning_point_cost >= 0)
-CHECK (base_duration_ticks IS NULL OR base_duration_ticks >= 1)
+CHECK (duration_type IS NULL OR duration_type IN ('AS_SCALED', 'FIXED', 'CONTROLLED'))
+CHECK (duration_ticks IS NULL OR duration_ticks >= 1)
+CHECK (duration_config IS NULL OR jsonb_typeof(duration_config) = 'object')
 CHECK (cooldown_ticks IS NULL OR cooldown_ticks >= 0)
 CHECK (max_consecutive_stacks IS NULL OR max_consecutive_stacks >= 1)
 ```
@@ -800,10 +800,12 @@ ON action_levels(action_id);
 
 - Resource costs are defined in `action_costs`.
 - `learning_point_cost` is used during the Ascension Phase.
-- Active Action levels must define `base_duration_ticks`, `cooldown_ticks`, and `max_consecutive_stacks`; Passive Action levels leave these columns null. This cross-table rule is enforced by the service layer.
+- Active Sect Technique levels must define `duration_type`, `cooldown_ticks`, and `max_consecutive_stacks`; Passive Action levels leave all duration fields null. Basic Action levels use `cooldown_ticks = 0` and `max_consecutive_stacks = null` for unlimited consecutive use. This cross-table rule is enforced by the service layer.
 - One tick is exactly 0.1 second.
-- AS does not modify any Action's duration. For Slash only, `effective_cooldown_ticks = max(0, floor(cooldown_ticks / AS))`. Defend, Shield, and Main or Support Sect Technique cooldowns are not modified by `AS`.
-- Cooldown begins at the end of the final occurrence in a gapless stack chain. Each occurrence pays its own configured costs.
+- Duration combinations are enforced by the service layer: `ACTIVE + AS_SCALED` requires `duration_type = AS_SCALED` with `duration_ticks` and `duration_config` null; `ACTIVE + FIXED` requires `duration_type = FIXED`, `duration_ticks >= 1`, and `duration_config` null; `ACTIVE + CONTROLLED` requires `duration_type = CONTROLLED`, `duration_ticks` null, and validated `duration_config` or a whitelisted registered handler; `PASSIVE` requires all duration fields null.
+- `duration_config` contains only fields declared by its typed duration DTO. It must never contain executable expressions, scripts, SQL, Java class names, or arbitrary code.
+- When an Active Action occurrence reaches its runtime start position, the server snapshots strictly positive `current_as` as `as_snapshot` and calculates duration from `duration_type`: `AS_SCALED` uses `max(1, ceil(10 / as_snapshot))`; `FIXED` uses `duration_ticks`; and `CONTROLLED` uses typed validated configuration or a whitelisted registered handler. The server uses the result to schedule the `(start, end]` interval and resolution timings. AS does not modify cooldown. `SLASH`, `DEFEND`, and `SHIELD` have no cooldown; Main and Support Sect Techniques use their configured cooldown unchanged.
+- For an Action with a configured cooldown, cooldown begins at the end of the final occurrence in a gapless stack chain. Each occurrence pays its own configured costs.
 - Dynamic Effects that modify another Action's duration or cooldown are intentionally not supported in the next version; the tick columns leave room for that future extension.
 - If a player has `current_level = 0`, the Action is locked and cannot be used.
 - If a player has `current_level = 1`, the server reads the row where `level = 1`.
@@ -845,7 +847,7 @@ UNIQUE (action_level_id, sequence_order)
 ```
 
 ```sql
-CHECK (resource_type IN ('HP', 'MP', 'QP'))
+CHECK (resource_type IN ('HP', 'QI'))
 ```
 
 ```sql
@@ -874,6 +876,7 @@ CHECK (sequence_order >= 0)
 
 - Java maps `resource_type` and `calculation_type` to enums.
 - Costs are paid atomically. If any required cost cannot be paid, no cost is paid and the Action fails.
+- A `QI` cost verifies `round_qi + reserve_qi >= required_qi`, spends `round_qi` first, then spends any remainder from `reserve_qi`.
 - Runtime validation uses `payment_timing`. Advisory queue validation never evaluates or simulates Action costs.
 - The service layer defines whether HP costs are allowed to reduce HP to zero.
 
@@ -919,6 +922,7 @@ UNIQUE (action_level_id, sequence_order)
 CHECK (
   event_type IN (
     'ACTION_HIT',
+    'ACTION_STARTED',
     'DAMAGE_DEALT',
     'DAMAGE_RECEIVED',
     'ATTRIBUTE_CHANGED',
@@ -947,6 +951,7 @@ CHECK (sequence_order >= 0)
 - `filter_config` is not arbitrary untyped state. Each `event_type` maps to a dedicated Java DTO and validator.
 - A three-hit passive uses `ACTION_HIT`, `EVENT_COUNT`, `ACCUMULATE`, threshold `3`, and `ON_TRIGGER`.
 - A passive triggered by losing at least 2 HP from one hit uses `DAMAGE_RECEIVED`, `EVENT_VALUE`, `SINGLE_EVENT`, and threshold `2`.
+- Predation uses `ACTION_STARTED` with a validated Shadow Sword Action filter. The battle engine resolves matching Passive triggers and applies their Shade before the Active Action's `RESOLVE_ON_START` Effects can consume it.
 - The engine enforces maximum trigger depth and maximum events per tick to prevent passive loops.
 
 ---
@@ -962,11 +967,10 @@ Examples:
 ```text
 - Deal damage
 - Heal HP
-- Gain MP
-- Drain QP
+- Restore Round Qi
+- Generate Reserve Qi
 - Apply Bleed
 - Apply Blind
-- Increase max MP
 - Remove a status effect
 ```
 
@@ -1024,7 +1028,7 @@ CHECK (max_charges IS NULL OR max_charges >= 1)
 ```sql
 CHECK (
   period_timing IS NULL
-  OR period_timing IN ('TIMELINE_TICK_START', 'TIMELINE_TICK_END', 'RENEWAL_START', 'RENEWAL_END')
+  OR period_timing IN ('TIMELINE_TICK_START', 'TIMELINE_TICK_END', 'RENEWAL_START', 'RENEWAL_END', 'BATTLE_END')
 )
 ```
 
@@ -1055,7 +1059,7 @@ CHECK (
 
 - Instant Effects execute immediately and do not create `active_effects` rows.
 - Finite and infinite Effects create runtime instances in `active_effects`.
-- A two-second, one-use Shield uses `duration_type = 'FINITE_TICKS'`, `duration_ticks = 20`, and `max_charges = 1`. It expires when its charge is consumed or its lifetime ends.
+- `BATTLE_END` Effects execute after all timeline Actions and before round-scoped Gain Effects are removed, unless the Battle ended immediately because HP reached 0.
 - Effect operations belong to `effect_components`; passive activation conditions belong to `action_triggers`.
 - `behavior_handler` must map to a whitelisted Java enum and registered Spring handler.
 - Gameplay logic should remain in the Spring Boot service layer, not in database triggers or stored procedures.
@@ -1103,7 +1107,6 @@ CHECK (
     'GRANT_TAG',
     'REMOVE_TAG',
     'RESTORE_RESOURCE',
-    'CONVERT_RESOURCE',
     'CUSTOM_EXECUTION'
   )
 )
@@ -1125,8 +1128,7 @@ CHECK (jsonb_typeof(config) = 'object')
 | `REMOVE_EFFECT` | `RemoveEffectConfig` | Effect key or controlled tag filter. |
 | `GRANT_TAG` | `GrantTagConfig` | Valid gameplay tag. |
 | `REMOVE_TAG` | `RemoveTagConfig` | Valid gameplay tag. |
-| `RESTORE_RESOURCE` | `RestoreResourceConfig` | Resource and magnitude. |
-| `CONVERT_RESOURCE` | `ConvertResourceConfig` | Source, target, ratio, and cap rule. |
+| `RESTORE_RESOURCE` | `RestoreResourceConfig` | Resource target and magnitude. Qi targets must be `ROUND_QI` or `RESERVE_QI`. |
 | `CUSTOM_EXECUTION` | `CustomExecutionConfig` | Whitelisted handler key and validated parameters. |
 
 #### Notes
@@ -1134,6 +1136,7 @@ CHECK (jsonb_typeof(config) = 'object')
 - PostgreSQL cannot fully validate every polymorphic JSON shape. Static content is accepted only after `ContentValidator` deserializes every row into its declared Java DTO.
 - Content is compiled into immutable in-memory definitions before matches can start.
 - Unknown component types, unknown fields, missing fields, and unknown handler keys fail application startup or content validation.
+- Effects may restore or generate Qi. Every Qi-changing component explicitly targets `ROUND_QI` or `RESERVE_QI`; the service clamps the result to `0..550` or `0..150` respectively. Effects cannot modify a Qi maximum.
 
 ---
 
@@ -1161,6 +1164,7 @@ Quick Slash Level 2:
 | `action_level_id` | `uuid` | FK | No | Action level that triggers the Effect. References `action_levels.id`. |
 | `effect_definition_id` | `uuid` | FK | No | Effect triggered by the Action level. References `effect_definitions.id`. |
 | `activation_phase` | `varchar(30)` |  | No | Point in Action execution at which the Effect is applied. |
+| `period_interval_ticks` | `int` |  | Yes | Repeating cadence in 0.1-second ticks for a `RESOLVE_DURING_EXECUTION` mapping. |
 | `target_selector` | `varchar(20)` |  | No | Runtime target selected for this Effect application. |
 | `sequence_order` | `int` |  | No | Order in which the Effect is resolved when multiple Effects exist. |
 | `stop_on_failure` | `boolean` |  | No | Whether later mappings stop when this Effect cannot be applied. |
@@ -1190,8 +1194,12 @@ UNIQUE (action_level_id, sequence_order)
 ```
 
 ```sql
-CHECK (activation_phase IN ('ON_EXECUTION_START', 'DURING_EXECUTION', 'ON_ACTION_RESOLVE', 'ON_HIT', 'ON_PASSIVE_TRIGGER'))
+CHECK (activation_phase IN ('RESOLVE_ON_START', 'RESOLVE_DURING_EXECUTION', 'RESOLVE_ON_END', 'ON_HIT', 'ON_PASSIVE_TRIGGER'))
 CHECK (target_selector IN ('SELF', 'OPPONENT', 'BOTH', 'ACTION_SOURCE', 'ACTION_TARGET'))
+CHECK (
+  period_interval_ticks IS NULL
+  OR (activation_phase = 'RESOLVE_DURING_EXECUTION' AND period_interval_ticks >= 1)
+)
 CHECK (sequence_order >= 0)
 ```
 
@@ -1219,7 +1227,8 @@ ON action_effects(effect_definition_id);
 - `sequence_order` controls the order of Effect resolution.
 - Target selection belongs to this mapping so the same reusable Effect can be applied to different targets.
 - Cost payment should be handled before resolving Effects.
-- `RESOLVE_ON_COMPLETION` Actions normally use `ON_ACTION_RESOLVE`. `ACTIVE_DURING_EXECUTION` Actions use `DURING_EXECUTION` for the complete `(start, end]` interval.
+- `RESOLVE_ON_START` mappings resolve at `start_tick + 1`; `RESOLVE_DURING_EXECUTION` mappings apply for the complete `(start, end]` interval; and `RESOLVE_ON_END` mappings resolve at `end_tick`. Each of these mappings must use a resolution type declared by its Action.
+- `period_interval_ticks` is null for non-periodic mappings. For a periodic mapping, the first resolution is after one complete interval, later resolutions repeat at that cadence, and an endpoint-aligned resolution occurs at the Action's inclusive endpoint. The engine never resolves the mapping after the Action endpoint.
 - `stop_on_failure` defines deterministic failure behavior.
 - This table allows the same Effect definition to be reused across multiple Actions and levels.
 - This table supports data-driven Action design without hardcoding every Action’s behavior in server code.
@@ -1329,7 +1338,7 @@ ON rooms(player_b_id);
 
 The `matches` table stores the main runtime state of a match.
 
-A match is created from a room after both players are ready and connected. The match proceeds through pre-match selection, Renewal, Ascension, Action Strategy, Battle, and Game Over phases.
+A match is created from a room after both players are ready and connected. Round 1 proceeds through pre-match selection, Renewal, Action Strategy, Battle, and Game Over. Round 2 and later also include Ascension between Renewal and Action Strategy.
 
 Battle resolution is simultaneous on a shared timeline. One tick is 0.1 second, and there is no initiative field.
 
@@ -1447,18 +1456,16 @@ Stats and resources are stored directly in this table to provide fast UI renderi
 | `main_sect_id` | `uuid` | FK | Yes | Main Sect selected by the player. References `sects.id`. |
 | `support_sect_id` | `uuid` | FK | Yes | Support Sect selected by the player. References `sects.id`. |
 | `str_level` | `int` |  | No | Current upgrade level of STR, from 1 through 3. |
-| `str_value` | `int` |  | No | Current STR value. |
+| `str_value` | `int` |  | No | Permanent STR value after Ascension upgrades, before temporary Effect modifiers. |
 | `hp_level` | `int` |  | No | Current upgrade level of HP, from 1 through 3. |
 | `hp_current` | `int` |  | No | Current HP value. |
-| `hp_max` | `int` |  | No | Maximum HP value. Healing cannot exceed this value. |
+| `hp_max` | `int` |  | No | Permanent HP maximum after Ascension upgrades, before temporary Effect modifiers. Healing cannot exceed this value. |
 | `def_level` | `int` |  | No | Current upgrade level of DEF, from 1 through 3. |
-| `def_value` | `int` |  | No | Current DEF value. |
+| `def_value` | `int` |  | No | Permanent DEF value after Ascension upgrades, before temporary Effect modifiers. |
 | `as_level` | `int` |  | No | Current upgrade level of AS, from 1 through 3. |
-| `as_value` | `int` |  | No | Current AS value. |
-| `mp_current` | `int` |  | No | Current MP value. |
-| `mp_max` | `int` |  | No | Maximum MP value. MP restoration cannot exceed this value. |
-| `qp_current` | `int` |  | No | Current QP value. |
-| `qp_max` | `int` |  | No | Maximum QP value. MP-to-QP conversion cannot exceed this value. |
+| `as_value` | `numeric(10,2)` |  | No | Permanent AS value after Ascension upgrades, before temporary Effect modifiers. |
+| `round_qi` | `int` |  | No | Current Round Qi. Global range: 0 through 550. |
+| `reserve_qi` | `int` |  | No | Current Reserve Qi. Global range: 0 through 150. |
 | `pending_ascension` | `jsonb` |  | Yes | Temporary Ascension allocation submitted by the player before the phase resolves. |
 | `ascension_confirmed` | `boolean` |  | No | Whether the player has confirmed Ascension for the current round. |
 | `action_queue_confirmed` | `boolean` |  | No | Whether the player has confirmed Action Queue for the current round. |
@@ -1511,10 +1518,8 @@ CHECK (hp_current >= 0)
 CHECK (hp_max >= 0)
 CHECK (def_value >= 0)
 CHECK (as_value >= 1)
-CHECK (mp_current >= 0)
-CHECK (mp_max >= 0)
-CHECK (qp_current >= 0)
-CHECK (qp_max >= 0)
+CHECK (round_qi BETWEEN 0 AND 550)
+CHECK (reserve_qi BETWEEN 0 AND 150)
 ```
 
 ```sql
@@ -1526,8 +1531,6 @@ CHECK (as_level BETWEEN 1 AND 3)
 
 ```sql id="sc2jnu"
 CHECK (hp_current <= hp_max)
-CHECK (mp_current <= mp_max)
-CHECK (qp_current <= qp_max)
 ```
 
 ```sql id="fnka12"
@@ -1571,13 +1574,30 @@ ON match_players(user_id);
 - `seat` has no gameplay priority. Battle is simultaneous on a shared 0.1-second timeline.
 - `main_sect_id` and `support_sect_id` are null until the corresponding pre-match selections are resolved.
 - The six selected Actions are stored only in `match_player_action_slots`; Action IDs are not duplicated in this table.
-- Only `HP`, `STR`, `DEF`, and `AS` have Ascension upgrade levels. `MP` and `QP` are resources and have no Ascension level columns.
-- HP, MP, and QP have current and max values.
+- In Round 1, `str_level`, `hp_level`, `def_level`, and `as_level` are all 1. There is no Ascension allocation in that round.
+- Only `HP`, `STR`, `DEF`, and `AS` have Ascension upgrade levels. Qi is runtime state and has no Ascension level columns.
+- `HP`, `STR`, and `DEF` permanently increase as integers by 10%; two upgrades are cumulative because the second uses the first upgraded value. The server calculates `increase = ceil(stat_value * 0.10)`. `AS` is `numeric(10,2)` and uses `increase = ceil(as_value * 0.10 * 100) / 100`.
+- For an HP upgrade, `increase = ceil(hp_max * 0.10)`, `hp_max = hp_max + increase`, and `hp_current = min(hp_current + increase, hp_max)`. This immediately heals the player by the HP increase.
+- Temporary Effect modifiers are applied by the service layer and do not alter the permanent Ascension value.
+- `round_qi` and `reserve_qi` use global limits and are not granted by either Sect.
+- `available_qi` is derived as `round_qi + reserve_qi` and must not be persisted as a column.
 - Healing cannot increase `hp_current` above `hp_max`.
-- MP restoration cannot increase `mp_current` above `mp_max`.
-- MP-to-QP conversion cannot increase `qp_current` above `qp_max`.
+- A `QI` Action cost spends `round_qi` before `reserve_qi`; an insufficient combined balance pays no cost and produces `INSUFFICIENT_RESOURCE`.
 - `pending_ascension` is temporary phase state. It should be cleared after Ascension resolves.
 - The service layer should ensure each match has exactly two match players.
+
+#### Renewal runtime guidance
+
+The service resolves Renewal in this order:
+
+1. Resolve Effects scheduled for `RENEWAL_START`.
+2. Transfer remaining Round Qi into Reserve Qi using `transferableQi = min(round_qi, 150 - reserve_qi)`, then set `reserve_qi = reserve_qi + transferableQi`, `discardedQi = round_qi - transferableQi`, and `round_qi = 0`.
+3. Grant Round Qi for the new round: 150 in round 1, 250 in round 2, 300 in round 3, 350 in round 4, 400 in round 5, 450 in round 6, 500 in round 7, and 550 from round 8 onward.
+4. Resolve Effects scheduled for `RENEWAL_END`.
+5. Clamp `round_qi` and `reserve_qi` to their valid ranges.
+6. Remove expired Effects according to the existing Effect lifecycle.
+
+`RENEWAL_START` Effects may change Qi before the transfer. `RENEWAL_END` Effects observe the newly granted Round Qi, and any Round Qi that cannot fit in Reserve Qi is discarded.
 
 ---
 
@@ -1603,7 +1623,7 @@ Action unlock state is represented by `current_level`.
 ```text id="h74wqo"
 current_level = 0 means locked.
 current_level >= 1 means unlocked.
-Selected Basic Actions start at level 1.
+In Round 1, selected Basic Actions start at level 1 and all selected Sect Techniques start at level 0.
 ```
 
 #### Columns
@@ -1673,8 +1693,7 @@ ON match_player_action_slots(action_id);
 
 - The service layer should create exactly six Action slots for each match player.
 - `BASIC_1` and `BASIC_2` must reference two distinct `actions.action_key` values selected from `SLASH`, `DEFEND`, and `SHIELD`.
-- Both Basic Action slots start at `current_level = 1`.
-- Main and Support Action slots may start at `current_level = 0` if the Action is locked.
+- In Round 1, both Basic Action slots start at `current_level = 1`, and every Main and Support Technique slot starts at `current_level = 0`.
 - `MAIN_1`, `MAIN_2`, and `MAIN_3` must be distinct Actions belonging to the selected Main Sect.
 - `SUPPORT` must belong to the selected Support Sect, must not duplicate a Main Action, and must reference an Action with `is_ultimate = false`.
 - Main and Support Sects may be the same.
@@ -1688,7 +1707,7 @@ ON match_player_action_slots(action_id);
 
 The `action_queue_entries` table stores a player's submitted Action Queue for a specific round.
 
-Each row represents one ordered Action occurrence. Queue capacity is a timeline duration limit, not an entry-count limit. The same Action slot can appear multiple times in the same queue.
+Each row represents one ordered Action occurrence. An Action Queue has no entry-count or timeline-duration limit. The same Action slot can appear multiple times in the same queue.
 
 The optional queue-check operation is advisory and does not write these rows. Confirmation stores and locks the submitted occurrences without validating or rejecting them. If the player times out, the server uses an empty queue.
 
@@ -1703,6 +1722,7 @@ The optional queue-check operation is advisory and does not write these rows. Co
 | `sequence_index` | `int` |  | No | Zero-based occurrence order in the Action Queue. |
 | `action_slot_id` | `uuid` | FK | Yes | Submitted Action slot. Set to null when runtime converts an invalid occurrence to `EMPTY_RUNTIME`. References `match_player_action_slots.id`. |
 | `entry_status` | `varchar(30)` |  | No | Submitted or runtime-empty state of this occurrence. |
+| `as_snapshot` | `numeric(10,2)` |  | Yes | Strictly positive AS captured when the occurrence reaches its runtime start position. Null before runtime scheduling. |
 | `scheduled_start_tick` | `int` |  | Yes | Computed start on the 0.1-second Battle timeline. Null before scheduling. |
 | `scheduled_end_tick` | `int` |  | Yes | Computed inclusive end on the 0.1-second Battle timeline. Null before scheduling. The interval is `(start, end]`. |
 | `runtime_failure_reason` | `varchar(50)` |  | Yes | Reason an occurrence became `EMPTY_RUNTIME`. |
@@ -1751,8 +1771,7 @@ CHECK (entry_status IN ('SUBMITTED', 'EMPTY_RUNTIME', 'EXECUTED'))
 CHECK (
   runtime_failure_reason IS NULL
   OR runtime_failure_reason IN (
-    'DURATION_LIMIT_EXCEEDED',
-    'COUNTDOWN_INVALID',
+    'COOLDOWN_INVALID',
     'INSUFFICIENT_RESOURCE',
     'ACTION_NOT_OWNED',
     'ACTION_LOCKED',
@@ -1774,6 +1793,7 @@ CHECK (
 ```sql
 CHECK (scheduled_start_tick IS NULL OR scheduled_start_tick >= 0)
 CHECK (scheduled_end_tick IS NULL OR scheduled_end_tick >= 1)
+CHECK (as_snapshot IS NULL OR as_snapshot > 0)
 CHECK (
   (scheduled_start_tick IS NULL AND scheduled_end_tick IS NULL)
   OR
@@ -1806,13 +1826,13 @@ ON action_queue_entries(match_player_id, round_number);
 - Queue entries reference `match_player_action_slots`, not `actions` directly.
 - The same `action_slot_id` may appear multiple times in the same round.
 - Queue confirmation does not run validation and does not reject an invalid queue.
-- Before confirmation, the server may calculate an advisory result containing timing, cooldown, stack, transition, ownership, level, and activation-type violations without persisting or locking the queue. It never checks resource sufficiency.
-- At runtime, the service layer checks ownership, Action level, activation type, timeline duration, cooldown, consecutive stack, costs, disabled state, and other execution requirements.
-- A runtime-invalid occurrence is changed to `EMPTY_RUNTIME`, its `action_slot_id` is cleared, and `runtime_failure_reason` records why. It pays no cost and produces no Action Effects.
+- Before confirmation, the server may calculate an advisory result containing timing, cooldown, stack, transition, ownership, level, and activation-type violations without persisting or locking the queue. It estimates `AS_SCALED` from current AS, uses configured ticks for `FIXED`, and evaluates the available-state rule for `CONTROLLED`. It never checks resource sufficiency.
+- At runtime, the service layer checks ownership, Action level, activation type, cooldown, consecutive stack, costs, disabled state, and other execution requirements.
+- A runtime-invalid occurrence is changed to `EMPTY_RUNTIME`, its `action_slot_id` is cleared, and `runtime_failure_reason` records why. It pays no cost and produces no Action Effects. `EMPTY_RUNTIME` is the database representation of the public `EMPTY_SLOT` runtime status.
 - Runtime conversion to `EMPTY_RUNTIME` must not stop the opponent's timeline.
-- `scheduled_start_tick` and `scheduled_end_tick` preserve deterministic `(start, end]` timing, including after an occurrence becomes `EMPTY_RUNTIME`, so later Actions do not shift. Action duration is never modified by AS. Only Slash cooldown is divided by the player's current AS and rounded down to whole ticks.
-- The service layer enforces the round duration limit: 20 ticks in round 1, then 30, 40, 50, 60, and 70 ticks from round 6 onward.
-- After round 1, a valid sequence is derived from the previous confirmed sequence by removing zero or one occurrence, retaining relative order, and inserting new occurrences anywhere. Advisory validation reports violations without blocking confirmation; at runtime, violating occurrences are converted to `EMPTY_RUNTIME` with `QUEUE_TRANSITION_INVALID`.
+- `scheduled_start_tick` and `scheduled_end_tick` preserve deterministic `(start, end]` timing, including after an occurrence becomes `EMPTY_RUNTIME`, so later Actions do not shift. At its runtime start position, the server captures `as_snapshot`, calculates the occurrence's duration from `duration_type`, then reserves its interval before validation and cost checks. Later AS changes may affect later `AS_SCALED` or AS-dependent `CONTROLLED` occurrences that have not started, but never reschedule an occurrence that has started and never affect `FIXED` occurrences. AS does not modify cooldown. Basic Actions have no cooldown; Sect Techniques use their configured cooldown unchanged.
+- The service layer does not enforce an Action Queue entry-count or timeline-duration limit.
+- After round 1, a valid sequence is derived from the previous confirmed sequence by removing zero or one contiguous range, retaining the relative order of all remaining occurrences, and inserting new occurrences anywhere. The removed range must satisfy `removed_duration_ticks * 3 <= previous_resolved_queue_duration_ticks`; this previous duration is the prior round's authoritative duration, including reserved runtime-empty intervals, not a capacity. Advisory validation reports violations without blocking confirmation; at runtime, violating occurrences are converted to `EMPTY_RUNTIME` with `QUEUE_TRANSITION_INVALID`.
 
 ---
 
@@ -1828,9 +1848,8 @@ Examples:
 - Bleed
 - Blind
 - Regeneration
-- Temporary max MP increase
+- Reserve Qi regeneration
 - Defense reduction
-- One-charge Shield
 ```
 
 Instant Effects do not need to be stored in this table. Effects with duration or ongoing behavior are stored here.
@@ -1922,8 +1941,9 @@ ON active_effects(effect_definition_id);
 - Effects with duration, delayed triggers, stacking, or repeated behavior should be stored here.
 - Stacking behavior is defined by `effect_definitions.stacking_policy`.
 - The service layer should enforce max stack rules using `effect_definitions.max_stacks`.
-- Charge-based Effects are removed when `remaining_charges` reaches 0. A Shield decrements its charge when it negates an incoming damage instance.
+- Charge-based Effects are removed when `remaining_charges` reaches 0.
 - Tick-based Effects use the shared 0.1-second timeline and remain active through their inclusive endpoint.
+- Defend creates an execution-bound Effect with `remaining_charges = 1` and a lifetime equal to its occurrence's calculated interval. It is removed when it ignores its next qualifying Slash damage instance or when that interval reaches its endpoint; consuming the charge does not end the Defend occurrence.
 - When an active Effect expires, the service layer may delete the row or keep it until match cleanup. The recommended behavior is to delete expired active Effects.
 
 ---
