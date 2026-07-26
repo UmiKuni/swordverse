@@ -1592,7 +1592,7 @@ The service resolves Renewal in this order:
 
 1. Resolve Effects scheduled for `RENEWAL_START`.
 2. Transfer remaining Round Qi into Reserve Qi using `transferableQi = min(round_qi, 150 - reserve_qi)`, then set `reserve_qi = reserve_qi + transferableQi`, `discardedQi = round_qi - transferableQi`, and `round_qi = 0`.
-3. Grant Round Qi for the new round: 150 in round 1, 250 in round 2, 300 in round 3, 350 in round 4, 400 in round 5, 450 in round 6, 500 in round 7, and 550 from round 8 onward.
+3. Grant Round Qi for the new round: 150 in round 1, 200 in round 2, 250 in round 3, 300 in round 4, 350 in round 5, 400 in round 6, 450 in round 7, and 500 from round 8 onward.
 4. Resolve Effects scheduled for `RENEWAL_END`.
 5. Clamp `round_qi` and `reserve_qi` to their valid ranges.
 6. Remove expired Effects according to the existing Effect lifecycle.
