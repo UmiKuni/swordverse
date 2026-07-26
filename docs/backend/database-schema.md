@@ -1943,7 +1943,8 @@ ON active_effects(effect_definition_id);
 - The service layer should enforce max stack rules using `effect_definitions.max_stacks`.
 - Charge-based Effects are removed when `remaining_charges` reaches 0.
 - Tick-based Effects use the shared 0.1-second timeline and remain active through their inclusive endpoint.
-- Defend creates an execution-bound Effect with `remaining_charges = 1` and a lifetime equal to its occurrence's calculated interval. It is removed when it ignores its next qualifying Slash damage instance or when that interval reaches its endpoint; consuming the charge does not end the Defend occurrence.
+- Defend creates an execution-bound 100% DEF Boost with a lifetime equal to its occurrence's calculated interval.
+- Shield creates an execution-bound Effect with `remaining_charges = 1` and a lifetime equal to its fixed 10-tick interval. It is removed when it ignores its next qualifying Slash damage instance or when that interval reaches its endpoint; consuming the charge does not end the Shield occurrence.
 - When an active Effect expires, the service layer may delete the row or keep it until match cleanup. The recommended behavior is to delete expired active Effects.
 
 ---

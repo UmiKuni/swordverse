@@ -176,7 +176,7 @@ Every occurrence is checked against actual runtime state after its AS snapshot a
 
 Passive Actions may trigger from gameplay events produced during resolution. Passive results are included in timeline resolution events; Passive Actions are never valid executable queue entries.
 
-Defend creates one execution-bound blocking charge for its effective interval. It consumes the charge only when it ignores the next qualifying Slash damage instance; non-Slash damage, or an instance already ignored by a higher-priority Effect, does not consume it. The charge expires at the interval endpoint if unused, while the Defend occurrence continues until that endpoint even when the charge is consumed.
+Defend Boosts the performer's DEF by 100% throughout its complete effective execution interval. Shield creates one execution-bound blocking charge for its fixed 10-tick interval. Shield consumes the charge only when it ignores the next qualifying Slash damage instance; non-Slash damage, or an instance already ignored by a higher-priority Effect, does not consume it. The charge expires at the interval endpoint if unused, while the Shield occurrence continues until that endpoint even when the charge is consumed.
 
 ---
 
