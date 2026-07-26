@@ -124,9 +124,9 @@ For `stack = 1`, cooldown begins after every occurrence.
 
 An Action may create an Effect whose lifetime differs from the Action's execution duration. Such an Effect remains active until its lifetime expires or its removal condition is met.
 
-Shield is `FIXED` at 10 ticks and does not create a persistent shield Effect. Through `RESOLVE_DURING_EXECUTION`, it Boosts the performer's DEF by 100% throughout its complete `(start, end]` interval. The DEF Boost is removed when the Action ends.
+Defend is `AS_SCALED` and execution-bound. Through `RESOLVE_DURING_EXECUTION`, it Boosts the performer's DEF by 100% throughout its complete effective `(start, end]` interval. The DEF Boost is removed when the Action ends.
 
-Defend is `AS_SCALED` and execution-bound. It creates exactly one blocking charge during its effective `(start, end]` interval. The charge ignores and consumes only the next incoming Slash damage instance; non-Slash damage does not consume it. If multiple qualifying Slash instances resolve at the same timeline point, deterministic same-tick ordering selects the first. A higher-priority Effect that already ignored the instance prevents Defend from consuming its charge. The Action continues after the charge is consumed, and an unused charge expires when Defend ends. A target remains under Defend throughout its execution interval even when the charge has been consumed.
+Shield is `FIXED` at 10 ticks and execution-bound. It creates exactly one blocking charge during its `(start, end]` interval. The charge ignores and consumes only the next incoming Slash damage instance; non-Slash damage does not consume it. If multiple qualifying Slash instances resolve at the same timeline point, deterministic same-tick ordering selects the first. A higher-priority Effect that already ignored the instance prevents Shield from consuming its charge. The Action continues after the charge is consumed, and an unused charge expires when Shield ends. A target remains under Shield throughout its execution interval even when the charge has been consumed.
 
 Actions or Effects that dynamically change another Action's duration or cooldown are reserved for a future version and are not implemented in the next version.
 

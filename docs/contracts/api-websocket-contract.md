@@ -161,7 +161,7 @@ During Renewal, the server:
 
 1. Resolves Effects scheduled for `RENEWAL_START`.
 2. Transfers remaining Round Qi into Reserve Qi using `transferableQi = min(roundQi, 150 - reserveQi)`, then sets `reserveQi = reserveQi + transferableQi`, `discardedQi = roundQi - transferableQi`, and `roundQi = 0`.
-3. Grants Round Qi for the new round: 150 in round 1, 250 in round 2, 300 in round 3, 350 in round 4, 400 in round 5, 450 in round 6, 500 in round 7, and 550 from round 8 onward.
+3. Grants Round Qi for the new round: 150 in round 1, 200 in round 2, 250 in round 3, 300 in round 4, 350 in round 5, 400 in round 6, 450 in round 7, and 500 from round 8 onward.
 4. Resolves Effects scheduled for `RENEWAL_END`.
 5. Clamps `roundQi` and `reserveQi` to their valid ranges.
 6. Removes expired Effects according to the existing Effect lifecycle.
@@ -176,7 +176,7 @@ Every occurrence is checked against actual runtime state after its AS snapshot a
 
 Passive Actions may trigger from gameplay events produced during resolution. Passive results are included in timeline resolution events; Passive Actions are never valid executable queue entries.
 
-Defend creates one execution-bound blocking charge for its effective interval. It consumes the charge only when it ignores the next qualifying Slash damage instance; non-Slash damage, or an instance already ignored by a higher-priority Effect, does not consume it. The charge expires at the interval endpoint if unused, while the Defend occurrence continues until that endpoint even when the charge is consumed.
+Defend Boosts the performer's DEF by 100% throughout its complete effective execution interval. Shield creates one execution-bound blocking charge for its fixed 10-tick interval. Shield consumes the charge only when it ignores the next qualifying Slash damage instance; non-Slash damage, or an instance already ignored by a higher-priority Effect, does not consume it. The charge expires at the interval endpoint if unused, while the Shield occurrence continues until that endpoint even when the charge is consumed.
 
 ---
 
@@ -1115,11 +1115,11 @@ Every phase event contains:
     "players": [
       {
         "playerId": "5ab5cf4a-dc55-4130-b8e2-5b7751b091e0",
-        "qi": { "roundQi": 250, "reserveQi": 150, "roundMax": 550, "reserveMax": 150, "available": 400 },
+        "qi": { "roundQi": 200, "reserveQi": 150, "roundMax": 550, "reserveMax": 150, "available": 350 },
         "renewalQi": {
           "roundQiTransferred": 40,
           "discardedRoundQi": 10,
-          "roundQiGranted": 250,
+          "roundQiGranted": 200,
           "effectChanges": [
             { "target": "ROUND_QI", "before": 40, "change": 10, "after": 50 }
           ]
