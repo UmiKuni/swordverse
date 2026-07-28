@@ -1,5 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { AppProviders } from "./app/providers";
+import { App } from "./app/App";
 
 const rootElement = document.getElementById('root')
 
@@ -9,9 +11,8 @@ if (!rootElement) {
 
 createRoot(rootElement).render(
     <StrictMode>
-        <main>
-            <h1>Swordverse</h1>
-            <p>This is client :D</p>
-        </main>
+        <AppProviders>
+            <App/>
+        </AppProviders>
     </StrictMode>
 )

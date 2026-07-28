@@ -9,14 +9,8 @@ game-client/
     ├── app/                -> Application entry point and global state
     │   ├── App.tsx
     │
-    ├── api/                -> HTTP/RTK query API definitions and types
+    ├── layouts/            -> Layout components for different pages   
     │
-    ├── realtime/           -> WebSocket/Socket.IO connection by STOMP
-    │
-    ├── features/           -> Feature-specific state management and API logic
-    │
-    ├── pages/              -> React components for each route/page
-    │
-    ├── shared/             -> Shared components, hooks, and utilities
+    ├── pages/              -> Page components for different routes
     │
     └── styles/
