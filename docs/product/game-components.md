@@ -27,20 +27,20 @@ The server captures a strictly positive `asSnapshot` when every Active Action be
 
 **- Duration Type:** `AS_SCALED`
 
-**- Description:** Assume a defensive stance and ignore the next incoming **Slash** damage instance while this Action executes.
+**- Description:** Assume a defensive stance and **Boost** the DEF stat by 100% while executing the Action.
 
 **- Effect Logic:** 
-`RESOLVE_DURING_EXECUTION`: Gain 1 execution-bound blocking charge. Ignore the next incoming **Slash** damage instance and consume the charge. Any unused charge expires when this Action ends.
+`RESOLVE_DURING_EXECUTION`: **Boost** 100% DEF.
 
 ### Shield
 **- Cost:** 60 | **Activation type:** Active
 
 **- Duration Type:** `FIXED` | **Duration:** 1 second
 
-**- Description:** **Boost** the DEF stat by 100% while executing the Action.
+**- Description:** Create a shield that ignores the next incoming **Slash** damage instance while this Action executes.
 
 **- Effect Logic:** 
-`RESOLVE_DURING_EXECUTION`: **Boost** 100% DEF.
+`RESOLVE_DURING_EXECUTION`: Gain 1 execution-bound blocking charge. Ignore the next incoming **Slash** damage instance and consume the charge. Any unused charge expires when this Action ends.
 
 ## 3 SECTS
 ### True Sword Sect - Chân Kiếm Phái
