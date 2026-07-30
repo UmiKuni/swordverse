@@ -1,6 +1,6 @@
 import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react"
 import type { RootState } from "../../app/store"
-import type { LoginCredentials, AuthSession } from "./auth.type";
+import type { LoginCredentials, AuthSession, RegisterCredentials, AuthUser } from "./auth.type";
 import { authenticated, signedOut } from "./authSlice";
 
 export const authApi = createApi({
@@ -21,7 +21,23 @@ export const authApi = createApi({
     endpoints: (builder) => ({
         login: builder.mutation<AuthSession, LoginCredentials>({
             query: (credentials) => ({
-                url: "api/auth/login",
+                url: "/api/auth/login",
+                method: "POST",
+                body: credentials,
+            }),
+            async onQueryStarted(_credentials, { dispatch, queryFulfilled}) {
+                try {
+                    const { data } = await queryFulfilled;
+                    dispatch(authenticated(data));
+                } catch {
+
+                }
+            }
+        }),
+
+        register: builder.mutation<AuthSession, RegisterCredentials>({
+            query: (credentials) => ({
+                url: "/api/auth/login",
                 method: "POST",
                 body: credentials,
             }),
@@ -37,7 +53,7 @@ export const authApi = createApi({
 
         refresh: builder.mutation<AuthSession, void>({
             query: () => ({
-                url: "api/auth/refresh",
+                url: "/api/auth/refresh",
                 method: "POST",
             }),
             async onQueryStarted(_arg, { dispatch, queryFulfilled}) {
@@ -53,7 +69,7 @@ export const authApi = createApi({
 
         logout: builder.mutation<void, void>({
             query: () => ({
-                url: "api/auth/logout",
+                url: "/api/auth/logout",
                 method: "POST",
             }),
             async onQueryStarted(_arg, { dispatch, queryFulfilled }) {
@@ -64,12 +80,21 @@ export const authApi = createApi({
                     dispatch(signedOut());
                 }
             }
-        })
+        }),
+
+        me: builder.query<AuthUser, void>({
+            query: () => ({
+                url: "/api/auth/me",
+                method: "GET",
+            })
+        }),
     })
 })
 
 export const {
     useLoginMutation,
+    useRegisterMutation,
     useRefreshMutation,
-    useLogoutMutation
+    useLogoutMutation,
+    useMeQuery
 } = authApi;

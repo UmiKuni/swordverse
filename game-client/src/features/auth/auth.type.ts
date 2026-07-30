@@ -9,6 +9,12 @@ export interface LoginCredentials {
     password: string;
 }
 
+export interface RegisterCredentials {
+    displayName: string;
+    username: string;
+    password: string;
+}
+
 export interface AuthSession {
     accessToken: string;
     accessTokenExpiresAt: number;
