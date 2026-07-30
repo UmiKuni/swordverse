@@ -1,31 +1,40 @@
-import { useState, type SubmitEvent} from "react"
-import { useLoginMutation } from "../features/auth/authApi"
-import { Link, useNavigate,  } from "react-router-dom"
+import { useState, type SubmitEvent } from "react"
+import { Link, useNavigate } from "react-router-dom";
+import { useRegisterMutation } from "../features/auth/authApi";
 
-export function LoginPage(){
+export function RegisterPage(){
     const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
+    const [displayName, setDisplayName] = useState("");
 
-    const [login, { isLoading, error }] = useLoginMutation();
+    const [register, { error, isLoading }] = useRegisterMutation();
     const navigate = useNavigate();
 
-    async function handleLogin(event: SubmitEvent<HTMLFormElement>) {
-        event.preventDefault();
+    async function handleRegister(event: SubmitEvent<HTMLFormElement>){
+        event.preventDefault()
 
         try {
-            await login({ username, password }).unwrap();
+            await register({ displayName, username, password }).unwrap();
             navigate("/");
         } catch {
             // RTK Query exposes the failure through `error`.
-        } finally {
-            setPassword("");
         }
     }
 
     return(
-        <form onSubmit={handleLogin}>
-            <h1>Login Page</h1>
-            
+        <form onSubmit={handleRegister}>
+            <h1> Register Page </h1>
+
+            <label>
+                Your Display Name: 
+                <input
+                    value={displayName}
+                    onChange={e => setDisplayName(e.target.value)}
+                    placeholder="Try some fancy name!"
+                    required
+                />
+            </label>
+
             <label>
                 Username: 
                 <input
@@ -48,11 +57,11 @@ export function LoginPage(){
             </label>
 
             <p>
-                Need a Sword ? <Link to="/register">Find here</Link>
+                Already have a sword ? <Link to="/login">Enter now</Link>
             </p>
 
             <button type="submit" disabled={isLoading}>
-                {isLoading ? "Logging in..." : "Login"}
+                {isLoading ? "Registering..." : "Register"}
             </button>
 
             {error ? <p role="alert">Invalid with error:</p> : null}
