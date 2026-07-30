@@ -23,7 +23,7 @@ export interface AuthSession {
     user: AuthUser
 }
 
-export type AuthStatus = "checking" | "annoymous" | "authenticated";
+export type AuthStatus = "checking" | "anonymous" | "authenticated";
 
 export interface AuthState {
     status: AuthStatus;

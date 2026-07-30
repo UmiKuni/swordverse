@@ -18,7 +18,7 @@ const authSlice = createSlice({
             state.error = null
         },
         signedOut(state){
-            state.status = "annoymous";
+            state.status = "anonymous";
             state.session = null;
             state.isSubmitting = false;
             state.error = null
