@@ -4,6 +4,8 @@ import { LoginPage } from "../pages/LoginPage";
 import { RootLayout } from "../layouts/RootLayout";
 import { RegisterPage } from "../pages/RegisterPage";
 import { ProtectedRoute } from "../features/auth/ProtetedRoute";
+import { HomePage } from "../pages/HomePage";
+import { LobbyPage } from "../pages/LobbyPage";
 
 export const router = createBrowserRouter([
     {
@@ -11,7 +13,7 @@ export const router = createBrowserRouter([
         children: [
             {
                 index: true,
-                element: <div>Home Page</div>
+                element: <HomePage/>
             },
             {
                 element: <AuthLayout/>,
@@ -31,7 +33,7 @@ export const router = createBrowserRouter([
                 children: [
                     {
                         path: "lobby",
-                        element: <div>LOBBY</div>
+                        element: <LobbyPage/>
                     }
                 ]
             },
