@@ -1,14 +1,14 @@
 import { useState, type SubmitEvent} from "react"
 import { useLoginMutation } from "../features/auth/authApi"
 import { Link, useNavigate,  } from "react-router-dom"
-import { type ClientApiError, toApiError } from "../lib/apiError";
+import { toApiError } from "../lib/apiError";
 
 export function LoginPage(){
     const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
-    const [formError, setFormError] = useState<ClientApiError | null>(null);
 
-    const [login, { isLoading, error }] = useLoginMutation();
+    const [login, { isLoading, error: rawError }] = useLoginMutation();
+    const apiError = rawError ? toApiError(rawError) : null;
     const navigate = useNavigate();
 
     async function handleLogin(event: SubmitEvent<HTMLFormElement>) {
@@ -17,8 +17,8 @@ export function LoginPage(){
         try {
             await login({ username, password }).unwrap();
             navigate("/");
-        } catch(reason) {
-            setFormError(toApiError(reason))
+        } catch {
+            // RTK Query places the failed request in `rawError`.
         } finally {
             setPassword("");
         }
@@ -57,9 +57,9 @@ export function LoginPage(){
                 {isLoading ? "Logging in..." : "Login"}
             </button>
 
-            {formError ? (
+            {apiError ? (
                 <p role="alert">
-                    {formError.code}: {formError.message}
+                    {apiError.code}: {apiError.message}
                 </p>
             ) : null}
         </form>
