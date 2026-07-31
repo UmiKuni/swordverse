@@ -3,6 +3,7 @@ import { AuthLayout } from "../layouts/AuthLayout";
 import { LoginPage } from "../pages/LoginPage";
 import { RootLayout } from "../layouts/RootLayout";
 import { RegisterPage } from "../pages/RegisterPage";
+import { ProtectedRoute } from "../features/auth/ProtetedRoute";
 
 export const router = createBrowserRouter([
     {
@@ -10,7 +11,7 @@ export const router = createBrowserRouter([
         children: [
             {
                 index: true,
-                element: <div>Client Page</div>
+                element: <div>Home Page</div>
             },
             {
                 element: <AuthLayout/>,
@@ -22,6 +23,15 @@ export const router = createBrowserRouter([
                     {
                         path: "register",
                         element: <RegisterPage/>
+                    }
+                ]
+            },
+            {
+                element: <ProtectedRoute />,
+                children: [
+                    {
+                        path: "lobby",
+                        element: <div>LOBBY</div>
                     }
                 ]
             },
