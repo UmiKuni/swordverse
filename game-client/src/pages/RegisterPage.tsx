@@ -1,11 +1,13 @@
 import { useState, type SubmitEvent } from "react"
 import { Link, useNavigate } from "react-router-dom";
 import { useRegisterMutation } from "../features/auth/authApi";
+import { type ClientApiError, toApiError } from "../lib/apiError";
 
 export function RegisterPage(){
     const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
     const [displayName, setDisplayName] = useState("");
+    const [formError, setFormError] = useState<ClientApiError | null>(null);
 
     const [register, { error, isLoading }] = useRegisterMutation();
     const navigate = useNavigate();
@@ -16,8 +18,8 @@ export function RegisterPage(){
         try {
             await register({ displayName, username, password }).unwrap();
             navigate("/");
-        } catch {
-            // RTK Query exposes the failure through `error`.
+        } catch(reason) {
+            setFormError(toApiError(reason));
         }
     }
 
@@ -64,7 +66,11 @@ export function RegisterPage(){
                 {isLoading ? "Registering..." : "Register"}
             </button>
 
-            {error ? <p role="alert">Invalid with error:</p> : null}
+            {formError ? (
+                <p role="alert">
+                    {formError.code}: {formError.message}
+                </p>
+            ) : null}
         </form>
     )
 }
