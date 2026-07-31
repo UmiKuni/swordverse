@@ -17,7 +17,7 @@ export function RegisterPage(){
 
         try {
             await register({ displayName, username, password }).unwrap();
-            navigate("/");
+            navigate("/lobby");
         } catch(reason) {
             // RTK Query places the failed request in `rawError`.
         }

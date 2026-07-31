@@ -16,7 +16,7 @@ export function LoginPage(){
 
         try {
             await login({ username, password }).unwrap();
-            navigate("/");
+            navigate("/lobby");
         } catch {
             // RTK Query places the failed request in `rawError`.
         } finally {
