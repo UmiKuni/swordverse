@@ -1,11 +1,18 @@
-/** Application bootstrap. It mounts the root React component in the browser. */
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import './index.css'
-import App from './App.tsx'
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import { AppProviders } from "./app/providers";
+import { App } from "./app/App";
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
+const rootElement = document.getElementById('root')
+
+if (!rootElement) {
+    throw new Error('Root element #root was not found')
+}
+
+createRoot(rootElement).render(
+    <StrictMode>
+        <AppProviders>
+            <App/>
+        </AppProviders>
+    </StrictMode>
 )
