@@ -27,6 +27,7 @@ export function connectRealtime(
 ) {
     let disposed = false;
 
+    // STOMP connection manager
     const client = new Client({
         brokerURL: REALTIME_URL,
         connectHeaders: {
@@ -35,15 +36,25 @@ export function connectRealtime(
         reconnectDelay: 0,
 
         onConnect: () => {
+            if (disposed) {
+                return;
+            }
+
             callbacks.onStateChange("general_connected");
 
-
             client.subscribe("/topic/system/status", (message) => {
-                const event: unknown = JSON.parse(message.body);
-
-                if (isSystemStatusEvent(event)) {
-                    callbacks.onSystemStatus(event);
+                try {
+                    const event: unknown = JSON.parse(message.body);
+        
+                    if (isSystemStatusEvent(event)) {
+                        callbacks.onSystemStatus(event);
+                    }           
+                } catch {
+                    if(!disposed) {
+                        callbacks.onStateChange("error")
+                    }
                 }
+                    
             });
 
             client.publish({
@@ -65,7 +76,7 @@ export function connectRealtime(
     })
 
     callbacks.onStateChange("connecting");
-    client.activate();
+    client.activate(); // Connection line
 
     return () => {
         disposed = true;
